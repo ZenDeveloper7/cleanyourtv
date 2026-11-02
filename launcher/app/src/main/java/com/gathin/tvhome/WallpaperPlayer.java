@@ -55,8 +55,19 @@ final class WallpaperPlayer {
     /** wallpaper_captions: the shown picture's name from wallpapers/captions.txt; null when off or there are none. */
     private final TextView caption;
     private final Map<String, String> names;
+    /** weather_package: the current weather's kind, which narrows the collection (Weather.forWeather); null for none. */
+    private Weather.Kind weather;
     /** wallpaper_moods: the collection's groups by time of day; empty rotates through all of it. */
     private final Map<String, Set<String>> moods;
+    /** wallpaper_dates: pictures shown only on their day. */
+    private final Map<String, List<String>> dates;
+    /** wallpaper_dates_seconds: a dated day's own pace; 0 keeps the minute rotation. */
+    private final int datedSeconds;
+    /** On a dated day with its own pace, the picture changes on this timer instead of the minute tick alone. */
+    private final Runnable datedTick = this::onDatedTick;
+    private boolean datedTickPosted;
+    /** Runs on the main thread each time the rotation puts a new picture on screen; null for nothing. */
+    private Runnable onPictureChanged;
     /** config.xml latitude and longitude for the sun's times, and today's {sunrise, sunset} once worked out. */
     private final String latitude, longitude;
     private LocalDate sunDay;
@@ -73,6 +84,8 @@ final class WallpaperPlayer {
         order = config.wallpaperOrder;
         preferences = context.getSharedPreferences("wallpaper_rotation", Context.MODE_PRIVATE);
         moods = config.wallpaperMoods;
+        dates = config.wallpaperDates;
+        datedSeconds = config.wallpaperDatesSeconds;
         latitude = moods.isEmpty() ? "" : context.getString(R.string.latitude);
         longitude = moods.isEmpty() ? "" : context.getString(R.string.longitude);
         // Playback state belongs to one collection. Changing the collection starts from its first
@@ -128,6 +141,10 @@ final class WallpaperPlayer {
         }
     }
 
+    void setOnPictureChanged(Runnable action) {
+        onPictureChanged = action;
+    }
+
     void start() {
         active = true;
         update();
@@ -135,6 +152,7 @@ final class WallpaperPlayer {
 
     void stop() {
         active = false;
+        cancelDatedTick();
     }
 
     /** Drops the wallpaper texture when Home is hidden and Android asks the process to free memory. */
@@ -148,31 +166,64 @@ final class WallpaperPlayer {
         root.setBackgroundColor(backgroundColor);
     }
 
-    /** The pictures the rotation picks from now: wallpaper_moods' group for the time of day, or the whole collection. */
+    /**
+     * The pictures the rotation picks from now: today's picture when wallpaper_dates names one, otherwise the
+     * undated ones, narrowed to wallpaper_moods' group for the time of day.
+     */
     private List<File> playable() {
-        if (moods.isEmpty()) return files;
         LocalDateTime now = LocalDateTime.now();
+        List<File> today = WallpaperDates.select(files, dates, now.toLocalDate());
+        // A dated day's pictures play as they are; wallpaper_moods and the weather only narrow the everyday collection.
+        if (WallpaperDates.forDay(dates, now.toLocalDate()) != null) return today;
+        today = Weather.forWeather(today, weather);
+        if (moods.isEmpty()) return today;
         if (!now.toLocalDate().equals(sunDay)) {
             sunDay = now.toLocalDate();
             sun = WallpaperMood.sun(sunDay, latitude, longitude, ZoneId.systemDefault());
         }
-        return WallpaperMood.select(files, moods, WallpaperMood.timeOfDay(now.getHour() * 60 + now.getMinute(), sun[0], sun[1]));
+        return WallpaperMood.select(today, moods, WallpaperMood.timeOfDay(now.getHour() * 60 + now.getMinute(), sun[0], sun[1]));
+    }
+
+    /** The weather's kind for the next pick (MainActivity, off a weather reading); null when there is none. */
+    void setWeather(Weather.Kind kind) {
+        weather = kind;
     }
 
     void close() {
         active = false;
         closed = true;
+        cancelDatedTick();
         decoder.shutdownNow();
     }
 
+    private void onDatedTick() {
+        datedTickPosted = false;
+        update();
+    }
+
+    private void cancelDatedTick() {
+        root.removeCallbacks(datedTick);
+        datedTickPosted = false;
+    }
+
+    /** Keeps the dated day's timer running while Home shows and today has dated pictures with their own pace. */
+    private void scheduleDatedTick(long intervalMs) {
+        if (!active || closed || datedTickPosted || intervalMs == this.interval) return;
+        datedTickPosted = true;
+        root.postDelayed(datedTick, intervalMs);
+    }
+
     void update() {
-        if (!active || closed || loading || files.isEmpty()) return;
+        if (!active || closed || files.isEmpty()) return;
+        long pace = WallpaperDates.intervalMs(dates, LocalDate.now(), interval, datedSeconds);
+        scheduleDatedTick(pace);
+        if (loading) return;
         String previous = preferences.getString("image", "");
         // A picture outside the time of day's group (the group changed) is replaced at once, not after the interval.
         List<File> playable = playable();
         File selected = WallpaperRotation.find(playable, previous);
         long changed = preferences.getLong("changed", 0);
-        if (selected == null || WallpaperRotation.due(changed, System.currentTimeMillis(), interval)) {
+        if (selected == null || WallpaperRotation.due(changed, System.currentTimeMillis(), pace)) {
             selected = WallpaperRotation.pick(playable, previous, order, random);
         }
         if (selected == null || selected.getName().equals(displayed)) return;
@@ -195,6 +246,7 @@ final class WallpaperPlayer {
                 show(bitmap);
                 displayed = next.getName();
                 showCaption(true);
+                if (onPictureChanged != null) onPictureChanged.run();
                 if (!displayed.equals(previous) || changed == 0) {
                     preferences.edit().putString("image", displayed)
                             .putLong("changed", System.currentTimeMillis()).apply();

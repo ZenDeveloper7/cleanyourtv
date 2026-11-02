@@ -66,7 +66,7 @@ public class AppAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder> {
     }
 
     static final class Entry {
-        static final int APP = 0, HOME_SETTINGS = 1, CARD = 2, EMPTY = 3;
+        static final int APP = 0, HOME_SETTINGS = 1, CARD = 2, EMPTY = 3, WATCH = 4;
 
         final int kind;
         final String label;
@@ -80,6 +80,8 @@ public class AppAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder> {
         int ambient;
         /** uniform_tiles card fill, top and bottom colour; null until sampled from the icon. */
         int[] backdrop;
+        /** A Continue watching tile's intent (WatchNext.intent); null for every other kind. */
+        Intent watch;
 
         Entry(String label, ComponentName component, Drawable banner, Drawable icon) {
             this(APP, label, component, banner, icon, null, 0);
@@ -221,6 +223,10 @@ public class AppAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder> {
     /** Packages drawn from their icon and name even when they have a banner (config.xml icon_tiles). */
     private final Set<String> iconTiles;
     private final List<Entry> items = new ArrayList<>();
+    /** Continue watching tiles (watch_next_packages), placed as their own row under the dock; empty for none. */
+    private List<Entry> watchNext = Collections.emptyList();
+    /** Where the Continue watching row starts in items, how many tiles it has and the empty places after them. */
+    private int watchStart = -1, watchCount, watchEmpty;
 
     AppAdapter(Context ctx, TileListener listener, int dockSize, Config cfg) {
         this.ctx = ctx;
@@ -340,9 +346,74 @@ public class AppAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder> {
             fresh.add(docked + i, new Entry(Entry.EMPTY, "", new ComponentName(ctx, "empty-dock-slot-" + i),
                     null, null, null, 0));
         }
+        // Continue watching: a row of its own under the dock, its free places left empty; never while reordering,
+        // so it is never part of a saved order, and only in the dock layout, where rows mean something.
+        watchStart = -1;
+        watchCount = watchEmpty = 0;
+        if (!watchNext.isEmpty() && dockRow && !singleRow && !reordering && fresh.size() >= dockSize) {
+            watchStart = dockSize;
+            watchCount = Math.min(watchNext.size(), dockSize);
+            fresh.addAll(watchStart, watchNext.subList(0, watchCount));
+            if (fresh.size() > watchStart + watchCount) {
+                watchEmpty = dockSize - watchCount;
+                for (int i = 0; i < watchEmpty; i++) {
+                    fresh.add(watchStart + watchCount + i, new Entry(Entry.EMPTY, "",
+                            new ComponentName(ctx, "empty-watch-slot-" + i), null, null, null, 0));
+                }
+            }
+        }
         items.clear();
         items.addAll(fresh);
         notifyDataSetChanged();
+    }
+
+    /** Identity of a set of Continue watching rows: a refresh with the same keys changes nothing. */
+    static List<String> watchKeys(List<WatchNext.Row> rows) {
+        List<String> keys = new ArrayList<>();
+        for (WatchNext.Row r : rows) keys.add(r.key() + "/" + r.posterUri + "/" + Math.round(r.progress() * 50));
+        return keys;
+    }
+
+    /**
+     * The tiles for these rows: the poster with its progress, or the app's icon and the title without one. Slow (it
+     * reads posters from other apps), so it runs off the main thread; setWatchNext puts the result in place.
+     */
+    static List<Entry> watchTiles(Context ctx, List<WatchNext.Row> rows, int accent) {
+        List<Entry> tiles = new ArrayList<>();
+        PackageManager pm = ctx.getPackageManager();
+        for (WatchNext.Row r : rows) {
+            Intent intent = WatchNext.intent(r);
+            if (intent == null) continue;
+            Drawable poster = WatchNext.tile(ctx, r, accent);
+            Drawable icon = null;
+            if (poster == null) {
+                try {
+                    icon = pm.getApplicationIcon(r.pkg);
+                } catch (PackageManager.NameNotFoundException e) {
+                    continue;
+                }
+            }
+            Entry e = new Entry(Entry.WATCH, r.title, new ComponentName(r.pkg, "watch-next-" + r.key().hashCode()),
+                    poster, icon, r.episode.isEmpty() ? null : r.episode, 0);
+            e.watch = intent;
+            tiles.add(e);
+        }
+        return tiles;
+    }
+
+    /** The Continue watching tiles for the next reload() (main thread). */
+    void setWatchNext(List<Entry> tiles) {
+        watchNext = tiles;
+    }
+
+    /** Whether the position is in the Continue watching row (its tiles or its empty places). */
+    boolean inWatchRow(int position) {
+        return watchStart >= 0 && position >= watchStart && position < watchStart + watchCount + watchEmpty;
+    }
+
+    /** One past the Continue watching row's last tile: its end for Left and Right. */
+    int watchRowEnd() {
+        return watchStart + watchCount;
     }
 
     /** icon_tiles: the app's icon centred on a dark banner-shaped tile, for apps whose own banner crops badly. */
@@ -510,6 +581,8 @@ public class AppAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder> {
         }
         h.card.setOnClickListener(v -> launch(e));
         h.card.setOnLongClickListener(v -> {
+            // A Continue watching tile is not an app: it has no place to move to and nothing to remove.
+            if (e.kind == Entry.WATCH) return true;
             if (tileMenu) {
                 int pos = h.getBindingAdapterPosition();
                 if (pos != RecyclerView.NO_POSITION) listener.onTileLongPress(pos, v);
@@ -531,6 +604,14 @@ public class AppAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder> {
         if (e.kind == Entry.HOME_SETTINGS) {
             ctx.startActivity(new Intent(ctx, HomeSettingsActivity.class)
                     .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
+            return;
+        }
+        if (e.kind == Entry.WATCH) {
+            try {
+                ctx.startActivity(e.watch);
+            } catch (Exception ex) {
+                Toast.makeText(ctx, ctx.getString(R.string.cant_open, e.label), Toast.LENGTH_SHORT).show();
+            }
             return;
         }
         Intent i = new Intent(Intent.ACTION_MAIN)
@@ -619,7 +700,7 @@ public class AppAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder> {
         List<String> keys = new ArrayList<>();
         for (int i = 0; i < movableCount(); i++) {
             Entry e = items.get(i);
-            if (e.kind != Entry.EMPTY) keys.add(e.component.flattenToShortString());
+            if (e.kind != Entry.EMPTY && e.kind != Entry.WATCH) keys.add(e.component.flattenToShortString());
         }
         return keys;
     }
@@ -657,6 +738,8 @@ public class AppAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder> {
 
     /** A position focus can land on: an empty dock slot gives the last dock app. */
     int focusablePosition(int position) {
+        // An empty place in the Continue watching row sends focus to its last tile.
+        if (watchStart >= 0 && position >= watchRowEnd() && position < watchRowEnd() + watchEmpty) return watchRowEnd() - 1;
         return DockSlots.focusable(position, docked, emptySlots);
     }
 

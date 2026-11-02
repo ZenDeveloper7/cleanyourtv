@@ -23,6 +23,127 @@
         android:visibility="gone"
         android:importantForAccessibility="no" />
 
+    <!-- continue_spotlight: the newest Continue watching row as a backdrop, with its title and Resume above the dock.
+         The panel's height is set in code (MainActivity.placeSpotlight). -->
+    <FrameLayout
+        android:id="@+id/spotlight"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:visibility="gone">
+
+        <ImageView
+            android:id="@+id/spotlightArt"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:scaleType="centerCrop"
+            android:importantForAccessibility="no" />
+
+        <View
+            android:id="@+id/spotlightScrim"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:importantForAccessibility="no" />
+
+    </FrameLayout>
+
+    <!-- weather_package: the weather's tint and animation (rain, snow, fog, sun rays, stars) over the wallpaper and the spotlight's
+         backdrop (it comes after the spotlight so the poster does not hide it), under the clock and the tiles. -->
+    <com.gathin.tvhome.WeatherLayerView
+        android:id="@+id/weatherLayer"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:visibility="gone"
+        android:importantForAccessibility="no" />
+
+    <!-- continue_spotlight's text: above the weather layer, so rain and snow never cross it (the poster stays below). -->
+    <LinearLayout
+        android:id="@+id/spotlightPanel"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginStart="68dp"
+        android:orientation="vertical"
+        android:visibility="gone">
+
+        <TextView
+            android:id="@+id/spotlightKicker"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="3dp"
+            android:singleLine="true"
+            android:textAllCaps="true"
+            android:letterSpacing="0.18"
+            android:textColor="#B3FFFFFF"
+            android:textSize="13sp"
+            android:fontFamily="@string/font_medium" />
+
+        <TextView
+            android:id="@+id/spotlightTitle"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:maxWidth="1000dp"
+            android:singleLine="true"
+            android:ellipsize="end"
+            android:includeFontPadding="false"
+            android:letterSpacing="-0.02"
+            android:textColor="#FFFFFFFF"
+            android:textSize="44sp"
+            android:fontFamily="@string/font_light" />
+
+        <TextView
+            android:id="@+id/spotlightMeta"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="2dp"
+            android:layout_marginTop="8dp"
+            android:maxWidth="1000dp"
+            android:singleLine="true"
+            android:ellipsize="end"
+            android:textColor="#D9FFFFFF"
+            android:textSize="16sp"
+            android:fontFamily="@string/font_light" />
+
+        <LinearLayout
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="16dp"
+            android:gravity="center_vertical"
+            android:orientation="horizontal">
+
+            <TextView
+                android:id="@+id/spotlightResume"
+                style="@style/TopButton"
+                android:layout_marginStart="0dp"
+                android:text="@string/spotlight_resume"
+                android:drawableStart="@drawable/ic_play"
+                android:nextFocusDown="@+id/grid" />
+
+            <FrameLayout
+                android:id="@+id/spotlightTrack"
+                android:layout_width="220dp"
+                android:layout_height="4dp"
+                android:layout_marginStart="20dp"
+                android:background="#40FFFFFF">
+
+                <View
+                    android:id="@+id/spotlightProgress"
+                    android:layout_width="0dp"
+                    android:layout_height="match_parent"
+                    android:background="#FFFFFFFF" />
+            </FrameLayout>
+
+            <TextView
+                android:id="@+id/spotlightLeft"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="14dp"
+                android:singleLine="true"
+                android:textColor="#B3FFFFFF"
+                android:textSize="14sp"
+                android:fontFamily="@string/font_light" />
+        </LinearLayout>
+    </LinearLayout>
+
     <!-- Ambient glow in the colour of the focused dock app. -->
     <View
         android:id="@+id/ambient"

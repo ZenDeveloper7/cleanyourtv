@@ -15,7 +15,7 @@ sky-blue glow; on any other Android TV home it is an ordinary app.
 - **Snow, not rain, near freezing.** The models type precipitation by the air temperature and call snow
   "light rain" at 1 °C (ICON and GFS did, in a Ulaanbaatar blizzard). The app decides by the wet-bulb
   temperature instead, which counts how dry the air is: at 1 °C or below, rain and drizzle are shown as snow.
-- It reads Open-Meteo only while the page is on screen, every 30 minutes, or 5 minutes after a failure.
+- It reads Open-Meteo while the page is on screen (every 30 minutes, or 5 minutes after a failure), and in the background every 30 minutes once a city is chosen (see [Weather on Home](#weather-on-home)).
 - Degrees Celsius by default (Fahrenheit is an option below); English or French words, with the TV's language; day names follow the TV's language.
 
 ## Options
@@ -41,15 +41,28 @@ Saved choices override these defaults. With no saved choices the page is as abov
 
 ![A week, with humidity and wind](https://raw.githubusercontent.com/majnioui/cleanyourtv-contrib/pr-assets/addon-weather-week/weather-options.png)
 
+## Weather on Home
+
+The launcher's Home can show the current weather from this app. The app offers it through a read-only content
+provider, `content://io.github.sumyabazar1.weather.now/now`, named by a `meta-data` entry on the application
+(`com.gathin.tvhome.weather`). It returns one row with `code` (WMO), `temp_c`, `is_day` (1 or 0), `condition`
+(short English words, such as "Light rain") and `updated` (epoch milliseconds), or no row before the first
+reading. It never goes to the network when it is read.
+
+The reading comes from the app's own storage. The page saves each fresh reading, and so does a background
+refresh that runs every 30 minutes once a city is chosen. Nothing is fetched until a city is chosen. The job is
+scheduled when the app starts and is kept across restarts.
+
 ## Permissions
 
 | Permission | Why |
 |---|---|
 | `INTERNET` | Open-Meteo: the place search, the weather and the air quality. |
+| `RECEIVE_BOOT_COMPLETED` | Keeps the 30-minute refresh after a restart. |
 
 That is all. What is sent: the city name you type in the search, then that place's latitude and longitude. No
-account, no telemetry, no ads, no background service, no location permission. The chosen city stays in the
-app's own storage (backups are off).
+account, no telemetry, no ads, no location permission. The background refresh only runs once a city is chosen,
+and only on a network. The chosen city stays in the app's own storage (backups are off).
 
 ## Build and install
 

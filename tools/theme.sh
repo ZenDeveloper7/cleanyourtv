@@ -112,7 +112,11 @@ del() { echo "rm -f $DIR/$1 2>/dev/null; content delete --uri $URI/$1 2>/dev/nul
 # that left the pictures behind still shows the theme it just removed. Both paths use this one string.
 CLEAR_WALLPAPERS="rm -f $DIR/wallpapers/*.[jJ][pP][gG] $DIR/wallpapers/*.[jJ][pP][eE][gG] $DIR/wallpapers/*.[pP][nN][gG] $DIR/wallpapers/*.[wW][eE][bB][pP] 2>/dev/null; content delete --uri $URI/wallpapers 2>/dev/null"
 
+# screensaver_loops videos (screensaver/*.mp4). Cleared by --reset; a push replaces only those that changed.
+CLEAR_VIDEOS="rm -f $DIR/screensaver/*.[mM][pP]4 2>/dev/null"
+
 if [ "${1:-}" = --reset ]; then
+  tv "$CLEAR_VIDEOS" >/dev/null
   tv "mkdir -p $DIR 2>/dev/null; $(del config.json); $(del wallpaper.jpg); $(del wallpapers/captions.txt); $CLEAR_WALLPAPERS; printf '%s' '$REVISION' > $TMP-theme_revision; $(put theme_revision)" >/dev/null
   "$PY" -I theme_restart.py
   echo reset
@@ -189,6 +193,31 @@ if [ -f "$THEME/wallpapers/captions.txt" ]; then
 else
   tv "$(del wallpapers/captions.txt)" >/dev/null
 fi
+# Screensaver videos: a file already on the TV with the same md5 is not sent again (they are large); videos the
+# theme no longer has are removed.
+VIDEOS=""
+if [ -d "$THEME/screensaver" ]; then
+  for VIDEO in "$THEME"/screensaver/*.[mM][pP]4; do
+    [ -f "$VIDEO" ] || continue
+    NAME=$(basename "$VIDEO")
+    if [[ ! "$NAME" =~ ^[A-Za-z0-9_.-]+$ || "$NAME" == *..* ]]; then
+      echo "skipped screensaver video with an unsupported name: $NAME (letters, digits, '.', '_' and '-' only)" >&2
+      continue
+    fi
+    VIDEOS="$VIDEOS $NAME"
+    LOCAL_MD5=$(md5 -q "$VIDEO" 2>/dev/null || md5sum "$VIDEO" | cut -d' ' -f1)
+    REMOTE_MD5=$(tv "md5sum $DIR/screensaver/$NAME 2>/dev/null" | cut -d' ' -f1 | tr -d '\r')
+    if [ "$LOCAL_MD5" != "$REMOTE_MD5" ]; then
+      echo "pushing screensaver/$NAME ($(($(wc -c < "$VIDEO") / 1048576)) MB), this takes a while"
+      "$PY" -I b64push.py "$VIDEO" "$(stage "screensaver/$NAME")"
+      tv "$(put "screensaver/$NAME")" >/dev/null
+    fi
+  done
+fi
+KEEP=" $VIDEOS "
+for OLD in $(tv "ls $DIR/screensaver 2>/dev/null" | tr -d '\r'); do
+  case "$KEEP" in *" $OLD "*) ;; *) tv "$(del "screensaver/$OLD")" >/dev/null ;; esac
+done
 tv "printf '%s' '$REVISION' > $TMP-theme_revision; $(put theme_revision)" >/dev/null
 "$PY" -I theme_restart.py
 echo applied

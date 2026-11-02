@@ -273,6 +273,104 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
     private int greetingColor;
     /** The day the petal shower last played, so it greets the first Home of each day only. */
     private static LocalDate lastPetalShower;
+    /** When the birthday hearts last fell (uptime), so a return to Home replays them at most every ten minutes. */
+    private static long lastHearts;
+    /** watch_next_packages, for the Continue watching row; empty leaves it off. */
+    private java.util.Set<String> watchNextPackages = java.util.Collections.emptySet();
+    /** Reads Continue watching off the main thread; one refresh at a time. */
+    private final java.util.concurrent.ExecutorService watchNextLoader = java.util.concurrent.Executors.newSingleThreadExecutor();
+    private boolean watchNextLoading;
+    /** Keys of the rows shown (AppAdapter.watchKeys); read by the loader, written on the main thread. */
+    private volatile List<String> watchNextKeys = java.util.Collections.emptyList();
+    /** New Continue watching tiles arrived while Home was not in front: rebuild on the next resume. */
+    private boolean watchNextDirty;
+    /** continue_spotlight, where it can apply (dock rows, not cinematic): the newest row above the dock. */
+    private boolean spotlightEnabled;
+    /**
+     * Home's session for the provider readers (weather, picks): it moves on at every pause and at destroy. A read
+     * started in one session skips its query, and drops its result, once the session has moved on, so a result that
+     * arrives after Home paused never reaches the screen (a later resume reads again).
+     */
+    private volatile int readerSession;
+
+    /** weather_package: the weather app's provider (null for none), its last reading, and the layer it drives. */
+    private android.net.Uri weatherUri;
+    private Weather.Now weatherNow;
+    private WeatherLayerView weatherLayer;
+    private final java.util.concurrent.ExecutorService weatherLoader = java.util.concurrent.Executors.newSingleThreadExecutor();
+    private static final long WEATHER_REFRESH_MS = 15 * MINUTE_MS;
+    /** The weather app announces each new reading (notifyChange): read it at once while Home is in front. */
+    private final android.database.ContentObserver weatherObserver = new android.database.ContentObserver(new Handler(Looper.getMainLooper())) {
+        @Override
+        public void onChange(boolean selfChange) {
+            if (resumed) refreshWeather();
+        }
+    };
+    private boolean weatherObserving;
+    private final Runnable weatherTick = new Runnable() {
+        @Override
+        public void run() {
+            refreshWeather();
+            handler.postDelayed(this, WEATHER_REFRESH_MS);
+        }
+    };
+    private View spotlight, spotlightPanel, spotlightProgress;
+    private ImageView spotlightArt;
+    private TextView spotlightKicker, spotlightTitle, spotlightMeta, spotlightLeft, spotlightResume;
+    private View spotlightScrim;
+    /** The row the spotlight shows, its key and its intent; null while it is hidden. */
+    private String spotlightKey;
+    private Intent spotlightIntent;
+
+    /** One spotlight slide: Continue watching's newest row, or a pick (picks_package). */
+    private static final class Slide {
+        final String key, kicker, title, meta, left, button;
+        final float progress;   // below 0: no progress bar
+        final Intent intent;
+        final Bitmap art;
+
+        Slide(String key, String kicker, String title, String meta, String left, String button, float progress,
+              Intent intent, Bitmap art) {
+            this.key = key;
+            this.kicker = kicker;
+            this.title = title;
+            this.meta = meta;
+            this.left = left;
+            this.button = button;
+            this.progress = progress;
+            this.intent = intent;
+            this.art = art;
+        }
+    }
+
+    /** The spotlight's slides: Continue watching first, then the picks; they take turns every SLIDE_MS. */
+    private Slide continueSlide;
+    private List<Slide> pickSlides = java.util.Collections.emptyList();
+    private int slideIndex;
+    private static final long SLIDE_MS = 20_000;
+    private final Runnable nextSlide = new Runnable() {
+        @Override
+        public void run() {
+            if (!resumed || spotlight == null) return;
+            // While Resume / Open has focus the slide stays, so OK opens what is on screen.
+            if (!spotlightResume.hasFocus()) {
+                slideIndex++;
+                showSlides();
+            }
+            handler.postDelayed(this, SLIDE_MS);
+        }
+    };
+    /** picks_package: the picks app's provider (null for none), and its loader. */
+    private android.net.Uri picksUri;
+    private final java.util.concurrent.ExecutorService picksLoader = java.util.concurrent.Executors.newSingleThreadExecutor();
+    private final android.database.ContentObserver picksObserver = new android.database.ContentObserver(new Handler(Looper.getMainLooper())) {
+        @Override
+        public void onChange(boolean selfChange) {
+            if (resumed) refreshPicks();
+        }
+    };
+    private boolean picksObserving;
+    private static final long HEARTS_GAP_MS = 10 * 60_000L;
     /** boot_to_live_tv: open the Live TV app on the first Home of each boot. */
     private boolean bootToLiveTv;
     /** open_on_start_choice: the app picked in Launcher settings may open on the first Home of each boot. */
@@ -432,6 +530,11 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
     private final Runnable minuteTick = new Runnable() {
         @Override
         public void run() {
+            // A festival that starts or ends at midnight while Home stays on screen: rebuild with or without it.
+            if (festive != festival.active(LocalDate.now())) {
+                recreate();
+                return;
+            }
             updateGreeting();
             updatePanel();
             // The pill follows the network callbacks and each return to Home; only the festive light follows the
@@ -503,6 +606,13 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
         // the theme's background, so launch looks the same.
         getWindow().setBackgroundDrawable(null);
         wallpaperPlayer = new WallpaperPlayer(this, root, cfg);
+        weatherLayer = findViewById(R.id.weatherLayer);
+        // No layer in this layout (layout-iw): weather stays off.
+        weatherUri = weatherLayer == null ? null : Weather.uri(this, cfg.weatherPackage);
+        // On the birthday every new picture of the slideshow arrives with its own shower of hearts.
+        if (festive && festival.isBirthday() && !reducedMotion) {
+            wallpaperPlayer.setOnPictureChanged(this::playPetalShower);
+        }
         sky = findViewById(R.id.sky);
         sky.setIntensity(cfg.skyIntensity);
         glass = findViewById(R.id.glass);
@@ -686,11 +796,28 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
                     AnimationUtils.loadAnimation(this, R.anim.tile_enter), 0.06f));
         }
         adapter = new AppAdapter(this, this, COLUMNS, cfg);
+        watchNextPackages = new java.util.HashSet<>(cfg.watchNextPackages);
         dockApps = cfg.dockApps;
         fillDockLeavesSlots = !cfg.fillDock;
         Order savedOrder = Order.load(Order.file(this));
         adapter.setSavedOrder(Order.ranks(savedOrder, dockApps), Order.docked(savedOrder, dockApps));
         grid.setAdapter(adapter);
+        // A layout without the spotlight's views (the Hebrew layout-iw copy) leaves the feature off instead of crashing.
+        spotlightEnabled = cfg.continueSpotlight && !cinematic && cfg.dockRow && !cfg.singleRow
+                && findViewById(R.id.spotlight) != null && findViewById(R.id.spotlightPanel) != null;
+        if (spotlightEnabled) setUpSpotlight();
+        // picks_package: suggestions take turns with Continue watching in the spotlight.
+        picksUri = spotlightEnabled ? Picks.uri(this, cfg.picksPackage) : null;
+        if (weatherUri != null && cfg.dockRow) {
+            // The weather's rain, snow, fog and rays stop at the dock, which moves with the grid's padding and scroll.
+            grid.addOnLayoutChangeListener((v, l, t, r, b, ol, ot, or, ob) -> placeWeatherEdge());
+            grid.addOnScrollListener(new RecyclerView.OnScrollListener() {
+                @Override
+                public void onScrolled(RecyclerView rv, int dx, int dy) {
+                    placeWeatherEdge();
+                }
+            });
+        }
 
         // tvOS layout: push the dock row towards the bottom of the screen, leaving room for
         // rows_below_dock grid rows under it; the rest of the grid stays below until you press Down.
@@ -1078,6 +1205,34 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
     protected void onResume() {
         super.onResume();
         resumed = true;
+        if (picksUri != null) {
+            if (!picksObserving) {
+                try {
+                    getContentResolver().registerContentObserver(picksUri, false, picksObserver);
+                    picksObserving = true;
+                } catch (Exception ignored) {
+                    // a picks app without notifications: read on each return to Home
+                }
+            }
+            refreshPicks();
+        }
+        if (spotlight != null) {
+            handler.removeCallbacks(nextSlide);
+            handler.postDelayed(nextSlide, SLIDE_MS);
+        }
+        if (weatherUri != null) {
+            if (!weatherObserving) {
+                try {
+                    getContentResolver().registerContentObserver(weatherUri, false, weatherObserver);
+                    weatherObserving = true;
+                } catch (Exception ignored) {
+                    // an older weather app without notifications: the 15-minute reads still work
+                }
+            }
+            handler.removeCallbacks(weatherTick);
+            weatherTick.run();   // read now, then every 15 minutes while Home is in front
+            weatherLayer.start();
+        }
         // A festival that started or ended while Home was in the background: rebuild with or without it.
         if (festive != festival.active(LocalDate.now())) {
             recreate();
@@ -1093,6 +1248,10 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
         restartIdleClock();
         promptsPaused = false;
         if (grid.getAdapter() == null) grid.setAdapter(adapter);   // dropped by onTrimMemory
+        // Continue watching follows what was just watched: read in the background, applied when it arrives.
+        boolean watchChanged = watchNextDirty;
+        watchNextDirty = false;
+        refreshWatchNext();
         switch (tileRefresh.onResume(packagesChangedSinceRebuild())) {
             case REBUILD:
                 tilesReady = false;
@@ -1101,9 +1260,13 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
             case REFOCUS:
                 // The same tiles: only the focus goes back, as after a rebuild, without replaying the entrance.
                 tilesReady = false;
-                reloadApps(true, false, false);
+                reloadApps(true, watchChanged, false);
                 break;
             default:
+                if (watchChanged) {
+                    tilesReady = false;
+                    reloadApps(true, true, false);
+                }
                 break;
         }
         if (openLiveTvAfterBoot()) return;
@@ -1128,14 +1291,321 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
         sky.update();
         wallpaperPlayer.start();
         handler.postDelayed(minuteTick, MINUTE_MS);
-        if (festive && lamp != null) {
-            lamp.start();
+        if (festive) {
+            if (lamp != null) lamp.start();
             LocalDate today = LocalDate.now();
-            if (!reducedMotion && !today.equals(lastPetalShower)) {
+            if (reducedMotion) {
+                // no shower
+            } else if (festival.isBirthday()) {
+                // The birthday is one day: replay the hearts whenever Home comes back, not only on its first Home.
+                long now = SystemClock.uptimeMillis();
+                if (lastHearts == 0 || now - lastHearts >= HEARTS_GAP_MS) {
+                    lastHearts = now;
+                    handler.postDelayed(this::playPetalShower, 450);
+                }
+            } else if (!today.equals(lastPetalShower)) {
                 lastPetalShower = today;
                 handler.postDelayed(this::playPetalShower, 450);
             }
         }
+    }
+
+    /**
+     * Reads the Continue watching rows and their posters off the main thread (a slow image provider must never hold
+     * up Home), then rebuilds the tiles on it when they changed: at once while Home is in front, else on the next resume.
+     */
+    private void refreshWatchNext() {
+        if (watchNextPackages.isEmpty() || watchNextLoading || isDestroyed()) return;
+        watchNextLoading = true;
+        final android.content.Context app = getApplicationContext();
+        final java.util.Set<String> packages = watchNextPackages;
+        // The spotlight takes the newest row (not on festival days, which keep their own wallpaper); the row gets the rest.
+        final boolean spot = spotlightEnabled && !festival.active(LocalDate.now());
+        final int max = COLUMNS + (spot ? 1 : 0);
+        try {
+            watchNextLoader.execute(() -> {
+                List<WatchNext.Row> rows = WatchNext.read(app, packages, max);
+                List<String> keys = AppAdapter.watchKeys(rows);
+                WatchNext.Row lead = spot && !rows.isEmpty() ? rows.get(0) : null;
+                List<WatchNext.Row> rest = lead == null ? rows : rows.subList(1, rows.size());
+                if (spotlightEnabled) applySpotlight(lead, lead == null ? null : WatchNext.backdrop(app, lead), appLabel(app, lead));
+                // First the tiles from the poster cache (icons for the rest), then the missing posters, slowly.
+                if (!keys.equals(watchNextKeys)) applyWatchNext(keys, AppAdapter.watchTiles(app, rest, 0xFFFFFFFF));
+                if (WatchNext.fetchMissing(app, rows)) applyWatchNext(keys, AppAdapter.watchTiles(app, rest, 0xFFFFFFFF));
+                if (lead != null && WatchNext.fetchBackdrop(app, lead)) {
+                    applySpotlight(lead, WatchNext.backdrop(app, lead), appLabel(app, lead));
+                }
+                runOnUiThread(() -> watchNextLoading = false);
+            });
+        } catch (java.util.concurrent.RejectedExecutionException e) {
+            watchNextLoading = false;
+        }
+    }
+
+    /** Puts new Continue watching tiles in place (from the loader): at once while Home is in front, else on the next resume. */
+    private void applyWatchNext(List<String> keys, List<AppAdapter.Entry> tiles) {
+        runOnUiThread(() -> {
+            if (isDestroyed()) return;
+            watchNextKeys = keys;
+            adapter.setWatchNext(tiles);
+            if (!resumed) {
+                watchNextDirty = true;
+                return;
+            }
+            tilesReady = false;
+            reloadApps(true, true, false);
+        });
+    }
+
+    // ---- Continue watching spotlight (continue_spotlight) -----------------------------------------
+
+    private void setUpSpotlight() {
+        spotlight = findViewById(R.id.spotlight);
+        spotlightArt = findViewById(R.id.spotlightArt);
+        spotlightPanel = findViewById(R.id.spotlightPanel);
+        spotlightProgress = findViewById(R.id.spotlightProgress);
+        spotlightKicker = findViewById(R.id.spotlightKicker);
+        spotlightTitle = findViewById(R.id.spotlightTitle);
+        spotlightMeta = findViewById(R.id.spotlightMeta);
+        spotlightLeft = findViewById(R.id.spotlightLeft);
+        spotlightResume = findViewById(R.id.spotlightResume);
+        // The same scrim as the cinematic shelf: dark on the text's side and towards the dock.
+        spotlightScrim = findViewById(R.id.spotlightScrim);
+        spotlightScrim.setBackground(scrimDrawable());
+        spotlightArt.forceHasOverlappingRendering(false);
+        spotlightResume.setOnClickListener(v -> {
+            if (spotlightIntent == null) return;
+            try {
+                startActivity(spotlightIntent);
+            } catch (Exception e) {
+                android.widget.Toast.makeText(this, getString(R.string.cant_open, spotlightTitle.getText()),
+                        android.widget.Toast.LENGTH_SHORT).show();
+            }
+        });
+        spotlightResume.setOnFocusChangeListener((v, has) -> {
+            if (!has) return;
+            hideGlass();
+            hideHero();
+        });
+        spotlightResume.setOnKeyListener((v, code, event) -> {
+            if (code != KeyEvent.KEYCODE_DPAD_DOWN) return false;
+            if (event.getAction() == KeyEvent.ACTION_DOWN && adapter.appCount() > 0) {
+                focusTile(Math.max(0, Math.min(lastFocused, Math.min(COLUMNS, adapter.appCount()) - 1)));
+            }
+            return true;
+        });
+        // The panel sits above the dock, wherever the grid's padding puts it.
+        grid.addOnLayoutChangeListener((v, l, t, r, b, ol, ot, or, ob) -> placeSpotlight());
+        spotlightPanel.addOnLayoutChangeListener((v, l, t, r, b, ol, ot, or, ob) -> placeSpotlight());
+        // Below the dock the grid scrolls up: the panel goes with it and fades, so the dock never covers it.
+        grid.addOnScrollListener(new RecyclerView.OnScrollListener() {
+            @Override
+            public void onScrolled(RecyclerView rv, int dx, int dy) {
+                placeSpotlight();
+            }
+        });
+    }
+
+    /** Bottom of the panel 32dp above the dock's top (above the dock's name too, when dock_title shows one). */
+    private void placeSpotlight() {
+        if (spotlightPanel == null || grid.getHeight() == 0) return;
+        Rect r = new Rect(0, 0, grid.getWidth(), grid.getHeight());
+        root.offsetDescendantRectToMyCoords(grid, r);
+        float dockTop = r.top + grid.getPaddingTop();
+        float gap = 32 * density + (hero.getVisibility() == View.VISIBLE ? hero.getHeight() + 40 * density : 0);
+        int scrolled = grid.computeVerticalScrollOffset();
+        float y = Math.max(0f, dockTop - gap - spotlightPanel.getHeight()) - scrolled;
+        if (spotlightPanel.getY() != y) spotlightPanel.setY(y);
+        float alpha = Math.max(0f, 1f - scrolled / (120 * density));
+        spotlightPanel.setAlpha(alpha);
+        boolean shown = spotlight.getVisibility() == View.VISIBLE;
+        spotlightPanel.setVisibility(!shown ? View.GONE : alpha > 0f ? View.VISIBLE : View.INVISIBLE);
+        // The weather's rain and snow leave the text's area (with a margin) alone, so nothing falls through the letters.
+        if (weatherLayer != null) {
+            if (shown && alpha > 0f) {
+                int m = Math.round(24 * density);
+                Rect hole = new Rect(Math.round(spotlightPanel.getX()) - m, Math.round(y) - m,
+                        Math.round(spotlightPanel.getX() + spotlightPanel.getWidth()) + m, Math.round(y + spotlightPanel.getHeight()) + m);
+                weatherLayer.setEffectsHole(hole);
+            } else {
+                weatherLayer.setEffectsHole(null);
+            }
+        }
+    }
+
+    /** The app's name for the spotlight's kicker line, read off the main thread with the rows. */
+    private static String appLabel(android.content.Context app, WatchNext.Row row) {
+        if (row == null) return "";
+        try {
+            android.content.pm.PackageManager pm = app.getPackageManager();
+            return pm.getApplicationLabel(pm.getApplicationInfo(row.pkg, 0)).toString();
+        } catch (Exception e) {
+            return "";
+        }
+    }
+
+    /** Continue watching's newest row for the spotlight (art may be null), or none for null. */
+    private void applySpotlight(WatchNext.Row row, Bitmap art, String appName) {
+        runOnUiThread(() -> {
+            if (isDestroyed() || spotlight == null) return;
+            Intent intent = row == null ? null : WatchNext.intent(row);
+            continueSlide = intent == null ? null : new Slide(
+                    row.key() + "/" + Math.round(row.progress() * 50) + "/" + (art != null),
+                    appName.isEmpty() ? getString(R.string.spotlight_up_next) : getString(R.string.spotlight_kicker, appName),
+                    row.title, row.episode, spotlightLeft(row), getString(R.string.spotlight_resume),
+                    row.progress(), intent, art);
+            showSlides();
+        });
+    }
+
+    /** The picks (picks_package) for the spotlight, read off the main thread. Not on festival days. */
+    private void refreshPicks() {
+        final android.net.Uri uri = picksUri;
+        if (uri == null || festival.active(LocalDate.now())) {
+            pickSlides = java.util.Collections.emptyList();
+            showSlides();
+            return;
+        }
+        final android.content.Context app = getApplicationContext();
+        if (!resumed) return;
+        final int session = readerSession;
+        try {
+            picksLoader.execute(() -> {
+                if (session != readerSession) return;
+                List<Picks.Pick> picks = Picks.read(app, uri, 1280, 720);
+                runOnUiThread(() -> {
+                    if (session != readerSession || isDestroyed()) return;
+                    List<Slide> slides = new ArrayList<>();
+                    for (Picks.Pick p : picks) {
+                        slides.add(new Slide("pick/" + p.id + "/" + p.label + "/" + p.updated + "/" + (p.art != null),
+                                p.label.isEmpty() ? getString(R.string.spotlight_for_you_plain)
+                                        : getString(R.string.spotlight_for_you, p.label),
+                                p.title, p.reason, p.subtitle, getString(R.string.spotlight_open), -1f, p.intent, p.art));
+                    }
+                    pickSlides = slides;
+                    showSlides();
+                });
+            });
+        } catch (java.util.concurrent.RejectedExecutionException ignored) {
+        }
+    }
+
+    /** Shows the current slide, or hides the spotlight when there is none. */
+    private void showSlides() {
+        if (isDestroyed() || spotlight == null) return;
+        List<Slide> slides = new ArrayList<>();
+        if (continueSlide != null) slides.add(continueSlide);
+        slides.addAll(pickSlides);
+        if (slides.isEmpty()) {
+            boolean had = spotlightResume.hasFocus();
+            spotlightKey = null;
+            spotlightIntent = null;
+            spotlight.setVisibility(View.GONE);
+            spotlightPanel.setVisibility(View.GONE);
+            spotlightArt.setImageDrawable(null);
+            if (had && adapter.appCount() > 0) focusTile(0);
+            return;
+        }
+        Slide slide = slides.get(Math.floorMod(slideIndex, slides.size()));
+        if (slide.key.equals(spotlightKey)) return;
+        boolean fresh = spotlight.getVisibility() != View.VISIBLE;
+        spotlightKey = slide.key;
+        spotlightIntent = slide.intent;
+        spotlightKicker.setText(slide.kicker);
+        spotlightTitle.setText(slide.title);
+        spotlightMeta.setText(slide.meta);
+        spotlightMeta.setVisibility(slide.meta.isEmpty() ? View.GONE : View.VISIBLE);
+        spotlightLeft.setText(slide.left);
+        spotlightResume.setText(slide.button);
+        if (slide.progress >= 0f) {
+            ViewGroup.LayoutParams lp = spotlightProgress.getLayoutParams();
+            lp.width = Math.round(220 * density * Math.max(0.03f, slide.progress));
+            spotlightProgress.setLayoutParams(lp);
+        }
+        ((View) spotlightProgress.getParent()).setVisibility(slide.progress > 0f ? View.VISIBLE : View.GONE);
+        spotlightArt.setImageBitmap(slide.art);
+        spotlightArt.setVisibility(slide.art != null ? View.VISIBLE : View.GONE);
+        spotlightScrim.setVisibility(slide.art != null ? View.VISIBLE : View.GONE);   // no art: the wallpaper as it is
+        spotlight.setVisibility(View.VISIBLE);
+        placeSpotlight();   // the text is its own view: show it where the scroll allows
+        if (animations && !reducedMotion) {
+            if (fresh) {
+                spotlight.setAlpha(0f);
+                spotlight.animate().alpha(1f).setDuration(420).start();
+            } else {
+                // the next slide: the picture fades in over the last one's place
+                spotlightArt.setAlpha(0f);
+                spotlightArt.animate().alpha(1f).setDuration(600).start();
+            }
+        }
+    }
+
+    /** "42 min left", "1 h 12 min left", or "Up next" for a next-episode row; "" when the length is unknown. */
+    private String spotlightLeft(WatchNext.Row row) {
+        String left;
+        if (row.type == WatchNext.TYPE_NEXT) {
+            left = getString(R.string.spotlight_up_next);
+        } else if (row.duration > 0 && row.position > 0) {
+            long min = Math.max(1, (row.duration - row.position + 59_999) / 60_000);
+            left = min >= 60 ? getString(R.string.spotlight_left_hours, (int) (min / 60), (int) (min % 60))
+                    : getString(R.string.spotlight_left_min, (int) min);
+        } else {
+            left = "";
+        }
+        return left;
+    }
+
+    // ---- weather (weather_package) ----------------------------------------------------------------
+
+    /** Reads the weather app's current reading off the main thread (it is IPC), then applies it on the main thread. */
+    private void refreshWeather() {
+        final android.net.Uri uri = weatherUri;
+        final android.content.Context app = getApplicationContext();
+        if (uri == null || !resumed) return;
+        final int session = readerSession;
+        try {
+            weatherLoader.execute(() -> {
+                if (session != readerSession) return;
+                Weather.Now now = Weather.read(app, uri);
+                runOnUiThread(() -> {
+                    if (session == readerSession) applyWeather(now);
+                });
+            });
+        } catch (java.util.concurrent.RejectedExecutionException ignored) {
+        }
+    }
+
+    /**
+     * The layer's tint and animation, the wallpapers' weather and the greeting follow the reading. A stale or missing
+     * reading puts Home back to its usual look; festival days keep their own look (no layer, no weather wallpapers).
+     */
+    private void applyWeather(Weather.Now now) {
+        if (isDestroyed()) return;
+        weatherNow = now != null && now.fresh(System.currentTimeMillis()) ? now : null;
+        boolean plain = weatherNow == null || festival.active(LocalDate.now());
+        weatherLayer.setVisibility(plain ? View.GONE : View.VISIBLE);
+        weatherLayer.setWeather(plain ? null : weatherNow.kind, !plain && weatherNow.day);
+        wallpaperPlayer.setWeather(plain ? null : weatherNow.kind);
+        updateGreeting();
+    }
+
+    /** The weather effects end at the top of the dock's glass band (DockDecoration draws it above the tiles). */
+    private void placeWeatherEdge() {
+        if (weatherLayer == null || grid.getHeight() == 0) return;
+        Rect r = new Rect(0, 0, grid.getWidth(), grid.getHeight());
+        root.offsetDescendantRectToMyCoords(grid, r);
+        int dockTop = r.top + grid.getPaddingTop() - grid.computeVerticalScrollOffset();
+        weatherLayer.setEffectsBottom(Math.max(1, dockTop - Math.round(6 * density)));
+    }
+
+    /** "Rainy afternoon · 24°" in English, "<the usual greeting> · 24°" in other languages; null without a reading. */
+    private String weatherGreeting(int res, String lang) {
+        if (weatherNow == null) return null;
+        String temp = Math.round(weatherNow.tempC) + "°";
+        if (!"en".equals(lang)) return getString(res) + " · " + temp;
+        String part = res == R.string.good_morning ? "morning" : res == R.string.good_afternoon ? "afternoon"
+                : res == R.string.good_evening ? "evening" : "night";
+        return Weather.adjective(weatherNow.kind, weatherNow.day) + " " + part + " · " + temp;
     }
 
     /** Launcher settings' change count (Config.SETTINGS_REVISION_KEY); onResume rebuilds Home when it moved. */
@@ -1287,6 +1757,8 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
 
     private void restartIdleClock() {
         root.removeCallbacks(showIdleClock);
+        // On the birthday Home is the slideshow: the idle clock would cover it after a few quiet minutes.
+        if (festive && festival.isBirthday()) return;
         if (resumed && idleClockMs > 0) root.postDelayed(showIdleClock, idleClockMs);
     }
 
@@ -1294,6 +1766,18 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
     protected void onPause() {
         super.onPause();
         resumed = false;
+        readerSession++;   // results of reads still running are dropped
+        handler.removeCallbacks(weatherTick);
+        handler.removeCallbacks(nextSlide);
+        if (picksObserving) {
+            getContentResolver().unregisterContentObserver(picksObserver);
+            picksObserving = false;
+        }
+        if (weatherLayer != null) weatherLayer.stop();
+        if (weatherObserving) {
+            getContentResolver().unregisterContentObserver(weatherObserver);
+            weatherObserving = false;
+        }
         // No UP reaches a paused Home, so a vendor-key hold it saw go down would still open its app later.
         // Only Home's own share is dropped: a key service that saw the same DOWN keeps its hold.
         RemoteKeys.release(this);
@@ -1368,6 +1852,12 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
         super.onDestroy();
         RemoteKeys.release(this);
         cancelHoldOk();
+        watchNextLoader.shutdownNow();
+        readerSession++;
+        weatherLoader.shutdownNow();
+        picksLoader.shutdownNow();
+        handler.removeCallbacks(nextSlide);
+        handler.removeCallbacks(weatherTick);
         if (gameDay != null) gameDay.shutdown();
         unregisterReceiver(packageReceiver);
         if (openOnStartOnWake) unregisterReceiver(wakeReceiver);
@@ -2438,11 +2928,18 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
                 return true;
             }
             // In the dock, the last app is the row's end: the empty slots after it take no focus.
-            int rowCount = position < COLUMNS ? Math.min(count, adapter.dockFilled()) : count;
+            // The Continue watching row ends at its last tile too.
+            int rowCount = position < COLUMNS ? Math.min(count, adapter.dockFilled())
+                    : adapter.inWatchRow(position) ? adapter.watchRowEnd() : count;
             return GridNavigation.atHorizontalEdge(position, rowCount, COLUMNS,
                     rtlAppGrid, keyCode == KeyEvent.KEYCODE_DPAD_LEFT);
         }
         if (keyCode == KeyEvent.KEYCODE_DPAD_UP) {
+            if (position < COLUMNS && spotlightIntent != null && spotlightPanel.getVisibility() == View.VISIBLE) {
+                spotlightResume.requestFocus();             // dock row under the spotlight: Up goes to Resume
+                grid.playSoundEffect(SoundEffectConstants.NAVIGATION_UP);
+                return true;
+            }
             if (position < COLUMNS) return false;          // dock row: let focus move to the top bar
             target = position - COLUMNS;
         } else {
@@ -2742,7 +3239,9 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
             greeting.setText(festiveGreeting);
             greeting.setTextColor(liftTowardsWhite(festival.accentColor(), 0.25f));
         } else {
-            greeting.setText(greetingName.isEmpty() ? getString(res)
+            String weatherText = weatherGreeting(res, lang);
+            if (weatherText != null) greeting.setText(weatherText);
+            else greeting.setText(greetingName.isEmpty() ? getString(res)
                     : getString(R.string.greeting_with_name, getString(res), greetingName));
             greeting.setTextColor(greetingColor);
         }
@@ -3043,6 +3542,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
      * Settings that floats up.
      */
     private void applyFestiveSkin(TextView inputs, TextView settings) {
+        if (festival.isBirthday()) return;   // the normal icons; the greeting, accent and hearts carry it
         if (festival.isHalloween()) {
             SpookyIconDrawable bat = new SpookyIconDrawable(getResources(), density, SpookyIconDrawable.BAT);
             SpookyIconDrawable ghost = new SpookyIconDrawable(getResources(), density, SpookyIconDrawable.GHOST);
@@ -3099,6 +3599,11 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
         PetalShowerView shower = new PetalShowerView(this);
         root.addView(shower, new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+        if (festival.isBirthday()) {
+            shower.setHearts(true);
+            shower.play(70, 3400, () -> root.removeView(shower));
+            return;
+        }
         shower.play(60, 2200, () -> root.removeView(shower));
     }
 

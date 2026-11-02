@@ -63,6 +63,26 @@ public class FestivalTest {
     }
 
     @Test
+    public void startDateHoldsTheSkinBackUntilThatDay() {
+        Festival f = Festival.parse("birthday", "2026-06-01", "2026-06-01", "Happy Birthday", "");
+        assertFalse(f.active(LocalDate.of(2026, 5, 31)));
+        assertTrue(f.active(LocalDate.of(2026, 6, 1)));
+        assertFalse(f.active(LocalDate.of(2026, 6, 2)));
+        assertSame(Festival.NONE, Festival.parse("birthday", "13/11/2026", "", "", ""));
+        assertTrue(Festival.parse("diwali", "", "", "", "").active(DAY));
+    }
+
+    @Test
+    public void birthdayKeepsNormalIconsWithARoseAccent() {
+        Festival f = Festival.parse("Birthday", "", "", "");
+        assertTrue(f.isBirthday());
+        assertFalse(f.isHalloween());
+        assertEquals(Festival.ROSE, f.accentColor());
+        assertEquals(0xFF112233, Festival.parse("birthday", "", "", "#112233").accentColor());
+        assertFalse(Festival.parse("diwali", "", "", "").isBirthday());
+    }
+
+    @Test
     public void otherFestivalsKeepTheDiyaSkin() {
         assertFalse(Festival.parse("dussehra", "", "", "").isHalloween());
         assertFalse(Festival.parse("onam", "", "", "").isHalloween());

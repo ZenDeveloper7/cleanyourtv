@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <uses-feature android:name="android.software.leanback" android:required="false" />
+    <uses-feature android:name="android.hardware.touchscreen" android:required="false" />
+
+    <!-- Your own Jellyfin server on the home network: the library, your watch history and the posters. Nothing else. -->
+    <uses-permission android:name="android.permission.INTERNET" />
+    <!-- Keeps the hourly refresh (PicksJob) scheduled after a restart. -->
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+
+    <queries>
+        <!-- The weather add-on's current reading (addons/weather), when it is installed. -->
+        <provider android:authorities="io.github.sumyabazar1.weather.now" />
+        <!-- The Jellyfin app the picks open. -->
+        <package android:name="org.jellyfin.androidtv" />
+    </queries>
+
+    <application
+        android:allowBackup="false"
+        android:banner="@drawable/banner"
+        android:icon="@drawable/banner"
+        android:label="@string/app_name"
+        android:supportsRtl="false"
+        android:usesCleartextTraffic="true"
+        android:theme="@android:style/Theme.Material.NoActionBar.Fullscreen">
+
+        <!-- The launcher's spotlight (com.gathin.tvhome.Picks) reads the picks from this provider. -->
+        <meta-data android:name="com.gathin.tvhome.picks" android:value="io.github.zendeveloper7.picks.now" />
+
+        <provider
+            android:name=".PicksProvider"
+            android:authorities="io.github.zendeveloper7.picks.now"
+            android:exported="true" />
+
+        <service
+            android:name=".PicksJob"
+            android:exported="false"
+            android:permission="android.permission.BIND_JOB_SERVICE" />
+
+        <activity
+            android:name=".SetupActivity"
+            android:exported="true"
+            android:screenOrientation="landscape"
+            android:windowSoftInputMode="adjustResize">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LEANBACK_LAUNCHER" />
+            </intent-filter>
+        </activity>
+    </application>
+</manifest>

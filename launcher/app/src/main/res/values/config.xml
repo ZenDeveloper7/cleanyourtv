@@ -27,6 +27,12 @@
          set "fill_dock": false. -->
     <bool name="fill_dock">true</bool>
 
+    <!-- Continue watching: these apps' Watch Next rows (half-watched and next episodes) as a row under the dock.
+         Needs READ_TV_LISTINGS (the install script grants it); empty (the default) leaves the row off. A theme can set
+         "watch_next_packages" too. -->
+    <string-array name="watch_next_packages">
+    </string-array>
+
     <!-- Apps never shown as tiles (e.g. the Live TV app, which the Inputs menu already covers). -->
     <string-array name="hidden_apps">
         <item>com.mediatek.wwtv.tvcenter</item>
@@ -462,6 +468,16 @@
          Empty = off: nothing is read or watched. The launcher only reads what the add-on publishes and never goes
          online. A theme can set "game_day". -->
     <string name="game_day" translatable="false"></string>
+    <!-- Weather on Home: the package of a weather app that publishes the current weather (com.gathin.tvhome.weather
+         meta-data, see Weather.java), e.g. io.github.sumyabazar1.weather from addons/weather. Home then tints and
+         animates with the weather, names it in the greeting, and prefers wallpapers named for it (rain-*.jpg,
+         sun-*.jpg, cloud-*, fog-*, snow-*, storm-*). Empty leaves it off. A theme can set "weather_package". -->
+    <string name="weather_package" translatable="false"></string>
+    <!-- With continue_spotlight: the package of a picks app that suggests films and series (com.gathin.tvhome.picks
+         meta-data, see Picks.java), e.g. io.github.zendeveloper7.picks from addons/jellyfin-picks. Up to three picks
+         take turns with Continue watching in the spotlight, every 20 seconds, with an Open button. Empty leaves it off.
+         A theme can set "picks_package". -->
+    <string name="picks_package" translatable="false"></string>
 
     <!-- Time-of-day backdrop behind everything: a dark gradient that follows the clock, with a warm
          horizon glow around sunrise and sunset. 0 keeps the plain background (the default); 1 to 100
@@ -479,6 +495,16 @@
          dots, the focus glow takes the app's colour and the dock band turns translucent. false keeps the plain
          shelf. Can also be set with "cinematic_home": true in a theme's config.json. -->
     <bool name="cinematic_home">false</bool>
+    <!-- With watch_next_packages, true shows the newest Continue watching row as a large backdrop above the dock, with
+         its title, time left and a Resume button (Up from the dock); the row under the dock keeps the others. Off with
+         cinematic_home, single_row, and on festival days. Can also be set with "continue_spotlight": true in a
+         theme's config.json. -->
+    <bool name="continue_spotlight">false</bool>
+    <!-- Screensaver videos: with true, each time the screensaver starts it picks one of the theme's videos
+         (screensaver/*.mp4, pushed by tools/theme.sh) at random, never the one it played last, and loops it muted under
+         the clock until the screensaver ends. With no videos it is the usual clock. Can also be set with
+         "screensaver_loops": true in a theme's config.json. -->
+    <bool name="screensaver_loops">false</bool>
     <!-- With cinematic_home, false leaves out the dock position dots under the app's name, for a quieter shelf. Can
          also be set with "cinematic_dots": false in a theme's config.json. -->
     <bool name="cinematic_dots">true</bool>

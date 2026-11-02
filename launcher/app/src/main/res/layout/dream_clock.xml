@@ -5,6 +5,16 @@
     android:layout_height="match_parent"
     android:background="#FF000000">
 
+    <!-- screensaver_loops: the animated scenes, behind everything; shown only when the theme turns them on. -->
+
+    <!-- screensaver_loops: the theme's videos, between rounds of the scenes (ScreensaverVideo). -->
+    <TextureView
+        android:id="@+id/dreamVideo"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:visibility="gone"
+        android:importantForAccessibility="no" />
+
     <!-- The glow is its background; clock_wallpaper puts the picture in it, cropped like Home's. -->
     <ImageView
         android:id="@+id/dreamAmbient"
