@@ -69,6 +69,79 @@ public class PicksTest {
                 movie("5", 90), movie("6", 90), movie("1", 90));
         List<Picks.Pick> picks = Picks.choose(many, p, new Picks.Moment(WEEKNIGHT, "", true), NOW);
         assertEquals(Picks.COUNT, picks.size());
+        java.util.Set<String> ids = new java.util.HashSet<>();
+        for (Picks.Pick pick : picks) assertTrue(ids.add(pick.item.id));
+    }
+
+    @Test
+    public void weekendMorningDoesNotGetMovieNightBonus() {
+        for (int day : new int[]{7, 8}) {
+            assertTrue(!new Picks.Moment(LocalDateTime.of(2026, 11, day, 9, 0), "", true).weekendEvening());
+        }
+        assertTrue(new Picks.Moment(SATURDAY, "", false).weekendEvening());
+        assertTrue(!new Picks.Moment(LocalDateTime.of(2026, 11, 8, 21, 0), "", false).weekendEvening());
+    }
+
+    @Test
+    public void nearTiesPreferADifferentGenre() {
+        Picks.Profile p = Picks.Profile.of(Collections.emptyList());
+        // All candidates have identical context and quality scores; jitter is smaller than the diversity penalty.
+        Picks.Moment m = new Picks.Moment(WEEKNIGHT, "", false);
+        List<Picks.Pick> picks = Picks.choose(Arrays.asList(movie("a", 90, "Romance"),
+                movie("b", 90, "Romance"), movie("c", 90, "Romance"),
+                movie("d", 90, "Documentary")), p, m, NOW);
+        assertTrue(!picks.get(0).item.genres.equals(picks.get(1).item.genres));
+    }
+
+    @Test
+    public void recentSuggestionsLoseNearTiesButStrongTasteStillWins() {
+        Picks.Profile p = Picks.Profile.of(Collections.emptyList());
+        Picks.Moment m = new Picks.Moment(WEEKNIGHT, "", false);
+        java.util.Map<String, Long> recent = new java.util.HashMap<>();
+        recent.put("a", NOW);
+        List<Picks.Item> candidates = Arrays.asList(movie("a", 90, "Romance"), movie("b", 90, "Documentary"));
+        assertEquals("b", Picks.choose(candidates, p, m, NOW, recent).get(0).item.id);
+        p.genres.put("Romance", 1f);
+        assertEquals("a", Picks.choose(candidates, p, m, NOW, recent).get(0).item.id);
+        p.genres.clear();
+        assertEquals(Picks.choose(candidates, p, m, NOW).get(0).item.id,
+                Picks.choose(candidates, p, m, NOW + 4L * 86400000, recent).get(0).item.id);
+    }
+
+    @Test
+    public void cooldownDoesNotDriftDuringHourlyRefreshes() {
+        Picks.Profile p = Picks.Profile.of(Collections.emptyList());
+        Picks.Moment m = new Picks.Moment(WEEKNIGHT, "", false);
+        java.util.Map<String, Long> recent = Collections.singletonMap("a", NOW - 3600000);
+        List<Picks.Item> candidates = Arrays.asList(movie("a", 90, "Romance"), movie("b", 90, "Documentary"));
+        List<Picks.Pick> first = Picks.choose(candidates, p, m, NOW, recent, NOW);
+        List<Picks.Pick> next = Picks.choose(candidates, p, m, NOW + 3600000, recent, NOW);
+        for (int i = 0; i < first.size(); i++) {
+            assertEquals(first.get(i).item.id, next.get(i).item.id);
+            assertEquals(first.get(i).score, next.get(i).score, 0.00001f);
+        }
+    }
+
+    @Test
+    public void inputOrderDoesNotChangeRecommendations() {
+        List<Picks.Item> candidates = new java.util.ArrayList<>(Arrays.asList(movie("a", 90, "Romance"),
+                movie("b", 90, "Romance"), movie("c", 90, "Documentary")));
+        Picks.Profile p = Picks.Profile.of(Collections.emptyList());
+        Picks.Moment m = new Picks.Moment(WEEKNIGHT, "", false);
+        List<Picks.Pick> first = Picks.choose(candidates, p, m, NOW);
+        Collections.reverse(candidates);
+        List<Picks.Pick> second = Picks.choose(candidates, p, m, NOW);
+        for (int i = 0; i < first.size(); i++) assertEquals(first.get(i).item.id, second.get(i).item.id);
+    }
+
+    @Test
+    public void futureLibraryDatesDoNotReceiveNewAdditionBonus() {
+        Picks.Item base = movie("same", 90, "Documentary");
+        Picks.Item future = new Picks.Item(base.id, base.title, base.type, base.genres, base.people,
+                base.year, base.runtimeMin, base.childCount, base.rating, NOW + 86400000);
+        Picks.Profile p = Picks.Profile.of(Collections.emptyList());
+        Picks.Moment m = new Picks.Moment(WEEKNIGHT, "", false);
+        assertEquals(Picks.score(base, p, m, NOW).score, Picks.score(future, p, m, NOW).score, 0.00001f);
     }
 
     @Test

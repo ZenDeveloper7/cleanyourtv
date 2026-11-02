@@ -98,7 +98,8 @@ final class Picks {
         boolean weekendEvening() {
             DayOfWeek d = now.getDayOfWeek();
             int h = now.getHour();
-            return (d == DayOfWeek.FRIDAY && h >= 18) || d == DayOfWeek.SATURDAY || d == DayOfWeek.SUNDAY && h < 21;
+            return (d == DayOfWeek.FRIDAY && h >= 18) || (d == DayOfWeek.SATURDAY && h >= 18)
+                    || (d == DayOfWeek.SUNDAY && h >= 18 && h < 21);
         }
 
         boolean weeknight() {
@@ -168,14 +169,53 @@ final class Picks {
 
     /** The best COUNT picks, at most one per title, highest score first. */
     static List<Pick> choose(List<Item> candidates, Profile profile, Moment moment, long nowMs) {
-        List<Pick> all = new ArrayList<>();
+        return choose(candidates, profile, moment, nowMs, Collections.emptyMap());
+    }
+
+    /** Exposure penalties are fixed for each part of the day, so hourly refreshes stay stable. */
+    static List<Pick> choose(List<Item> candidates, Profile profile, Moment moment, long nowMs,
+                             Map<String, Long> recentlyShown) {
+        return choose(candidates, profile, moment, nowMs, recentlyShown, nowMs);
+    }
+
+    static List<Pick> choose(List<Item> candidates, Profile profile, Moment moment, long nowMs,
+                             Map<String, Long> recentlyShown, long exposureTimeMs) {
+        List<Pick> remaining = new ArrayList<>();
         Set<String> seen = new HashSet<>();
         for (Item item : candidates) {
             if (!seen.add(item.id)) continue;
-            all.add(score(item, profile, moment, nowMs));
+            Pick p = score(item, profile, moment, nowMs);
+            Long shown = recentlyShown.get(item.id);
+            float penalty = shown == null ? 0f : Math.max(0f, 1f - Math.max(0L, exposureTimeMs - shown) / (3f * 86400000f));
+            remaining.add(new Pick(item, p.score - penalty, p.reason));
         }
-        all.sort((a, b) -> Float.compare(b.score, a.score));
-        return all.size() > COUNT ? new ArrayList<>(all.subList(0, COUNT)) : all;
+        // Greedy reranking: strong taste matches still win, but near ties favour a different genre mix.
+        List<Pick> chosen = new ArrayList<>();
+        while (!remaining.isEmpty() && chosen.size() < COUNT) {
+            Pick winner = null;
+            float best = -Float.MAX_VALUE;
+            for (Pick p : remaining) {
+                float overlap = 0f;
+                for (Pick c : chosen) overlap = Math.max(overlap, genreOverlap(p.item, c.item));
+                float adjusted = p.score - overlap;
+                if (winner == null || adjusted > best || (adjusted == best && p.item.id.compareTo(winner.item.id) < 0)) {
+                    winner = p;
+                    best = adjusted;
+                }
+            }
+            chosen.add(new Pick(winner.item, best, winner.reason));
+            remaining.remove(winner);
+        }
+        return chosen;
+    }
+
+    private static float genreOverlap(Item a, Item b) {
+        Set<String> union = new HashSet<>(a.genres);
+        union.addAll(b.genres);
+        if (union.isEmpty()) return 0f;
+        Set<String> common = new HashSet<>(a.genres);
+        common.retainAll(b.genres);
+        return (float) common.size() / union.size();
     }
 
     /** One item's score and reason. Each rule adds to the score; the biggest contribution names the reason. */
@@ -254,7 +294,7 @@ final class Picks {
 
         // Well liked, and new in the library.
         if (item.rating > 0f) score += Math.max(-0.5f, Math.min(0.75f, (item.rating - 6.5f) / 3f));
-        if (item.addedMs > 0 && nowMs - item.addedMs < 14L * 24 * 3600 * 1000) {
+        if (item.addedMs > 0 && nowMs >= item.addedMs && nowMs - item.addedMs < 14L * 24 * 3600 * 1000) {
             score += 0.5f;
             if (0.5f > best) {
                 reason = "New in your library";

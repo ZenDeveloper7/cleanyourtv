@@ -49,8 +49,10 @@ final class Jellyfin {
         }
     }
 
+    private static final int PAGE_SIZE = 200;
     private static final int TIMEOUT_MS = 15_000;
-    private static final String ITEM_FIELDS = "Genres,People,ProductionYear,DateCreated,CommunityRating,ChildCount,RunTimeTicks";
+    // Only optional ItemFields go here; year, rating, runtime and series identity are standard DTO fields.
+    private static final String ITEM_FIELDS = "Genres,People,DateCreated,ChildCount,ItemCounts,RecursiveItemCount";
 
     final String base, apiKey;
 
@@ -108,26 +110,31 @@ final class Jellyfin {
      * people are read in a second call). titles maps the ids to show names, for "Because you watched ...".
      */
     List<Picks.Item> history(String userId, Map<String, String> titles) throws IOException, JSONException {
-        JSONArray played = items(userId, "Recursive=true&IncludeItemTypes=Movie,Episode&Filters=IsPlayed"
-                + "&SortBy=DatePlayed&SortOrder=Descending&Limit=60&Fields=" + ITEM_FIELDS + ",SeriesId,SeriesName");
         List<String> order = new ArrayList<>();
         Map<String, Picks.Item> movies = new LinkedHashMap<>();
         List<String> seriesIds = new ArrayList<>();
-        for (int i = 0; i < played.length(); i++) {
-            JSONObject o = played.getJSONObject(i);
-            if ("Episode".equals(o.optString("Type"))) {
-                String sid = o.optString("SeriesId", "");
-                if (sid.isEmpty() || order.contains(sid)) continue;
-                order.add(sid);
-                seriesIds.add(sid);
-                titles.put(sid, o.optString("SeriesName", ""));
-            } else {
-                Picks.Item m = item(o);
-                if (order.contains(m.id)) continue;
-                order.add(m.id);
-                movies.put(m.id, m);
-                titles.put(m.id, m.title);
+        // Limit distinct titles, not episodes: a long binge must not erase the rest of the profile.
+        for (int start = 0; order.size() < 60; start += PAGE_SIZE) {
+            JSONArray played = items(userId, "Recursive=true&IncludeItemTypes=Movie,Episode&Filters=IsPlayed"
+                    + "&SortBy=DatePlayed,SortName&SortOrder=Descending&StartIndex=" + start
+                    + "&Limit=" + PAGE_SIZE + "&Fields=" + ITEM_FIELDS);
+            for (int i = 0; i < played.length() && order.size() < 60; i++) {
+                JSONObject o = played.getJSONObject(i);
+                if ("Episode".equals(o.optString("Type"))) {
+                    String sid = o.optString("SeriesId", "");
+                    if (sid.isEmpty() || order.contains(sid)) continue;
+                    order.add(sid);
+                    seriesIds.add(sid);
+                    titles.put(sid, o.optString("SeriesName", ""));
+                } else {
+                    Picks.Item m = item(o);
+                    if (order.contains(m.id)) continue;
+                    order.add(m.id);
+                    movies.put(m.id, m);
+                    titles.put(m.id, m.title);
+                }
             }
+            if (played.length() < PAGE_SIZE) break;
         }
         Map<String, Picks.Item> series = new LinkedHashMap<>();
         if (!seriesIds.isEmpty()) {
@@ -148,19 +155,42 @@ final class Jellyfin {
     /** Unwatched films, and series not started yet: what a pick can be. */
     List<Picks.Item> candidates(String userId) throws IOException, JSONException {
         List<Picks.Item> out = new ArrayList<>();
-        JSONArray movies = items(userId, "Recursive=true&IncludeItemTypes=Movie&Filters=IsUnplayed&Limit=2000&Fields=" + ITEM_FIELDS);
-        for (int i = 0; i < movies.length(); i++) out.add(item(movies.getJSONObject(i)));
-        JSONArray series = items(userId, "Recursive=true&IncludeItemTypes=Series&Limit=2000&Fields=" + ITEM_FIELDS);
+        // A series can have a resumable first episode without any completed episodes yet.
+        java.util.Set<String> started = new java.util.HashSet<>();
+        JSONArray resume = allItems(userId, "Recursive=true&IncludeItemTypes=Movie,Episode&Filters=IsResumable");
+        for (int i = 0; i < resume.length(); i++) {
+            JSONObject o = resume.getJSONObject(i);
+            started.add(o.optString("Id", ""));
+            if ("Episode".equals(o.optString("Type"))) started.add(o.optString("SeriesId", ""));
+        }
+        JSONArray movies = allItems(userId, "Recursive=true&IncludeItemTypes=Movie&Filters=IsUnplayed&Fields=" + ITEM_FIELDS);
+        for (int i = 0; i < movies.length(); i++) {
+            JSONObject o = movies.getJSONObject(i);
+            JSONObject data = o.optJSONObject("UserData");
+            if (started.contains(o.optString("Id")) || hasProgress(data)) continue;
+            out.add(item(o));
+        }
+        JSONArray series = allItems(userId, "Recursive=true&IncludeItemTypes=Series&Fields=" + ITEM_FIELDS);
         for (int i = 0; i < series.length(); i++) {
             JSONObject o = series.getJSONObject(i);
-            JSONObject data = o.optJSONObject("UserData");
-            // Started series belong to Continue watching / Next Up, not to the picks.
-            if (data != null && (data.optBoolean("Played", false) || data.optDouble("PlayedPercentage", 0) > 0)) {
-                continue;
-            }
+            if (started.contains(o.optString("Id")) || hasProgress(o.optJSONObject("UserData"))) continue;
             out.add(item(o));
         }
         return out;
+    }
+
+    private static boolean hasProgress(JSONObject data) {
+        return data != null && (data.optBoolean("Played", false)
+                || data.optLong("PlaybackPositionTicks", 0) > 0 || data.optDouble("PlayedPercentage", 0) > 0);
+    }
+
+    private JSONArray allItems(String userId, String query) throws IOException, JSONException {
+        JSONArray out = new JSONArray();
+        for (int start = 0; ; start += PAGE_SIZE) {
+            JSONArray page = items(userId, query + "&SortBy=SortName&SortOrder=Ascending&StartIndex=" + start + "&Limit=" + PAGE_SIZE);
+            for (int i = 0; i < page.length(); i++) out.put(page.getJSONObject(i));
+            if (page.length() < PAGE_SIZE) return out;
+        }
     }
 
     /** Ids of titles the server finds similar to this one. */

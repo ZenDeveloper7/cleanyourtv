@@ -86,7 +86,18 @@ final class Refresh {
 
             String[] weather = weather(ctx);
             Picks.Moment moment = new Picks.Moment(LocalDateTime.now(), weather[0], !"0".equals(weather[1]));
-            List<Picks.Pick> picks = Picks.choose(candidates, profile, moment, System.currentTimeMillis());
+            long now = System.currentTimeMillis();
+            String owner = server.base + "/" + user;
+            JSONObject previous = saved(ctx);
+            if (previous != null && !owner.equals(previous.optString("owner"))) previous = null;
+            String bucket = moment.now.toLocalDate() + "/" + moment.partOfDay();
+            Map<String, Long> shown = recent(previous == null ? null : previous.optJSONObject("shown"), now);
+            // Freeze the exposure history within a time bucket. Otherwise each refresh penalises its own picks.
+            boolean sameBucket = previous != null && bucket.equals(previous.optString("bucket"));
+            Map<String, Long> cooldown = sameBucket
+                    ? recent(previous.optJSONObject("cooldown"), now) : new HashMap<>(shown);
+            long cooldownAt = sameBucket ? previous.optLong("cooldownAt", now) : now;
+            List<Picks.Pick> picks = Picks.choose(candidates, profile, moment, now, cooldown, cooldownAt);
 
             File posters = posters(ctx);
             JSONArray out = new JSONArray();
@@ -103,10 +114,16 @@ final class Refresh {
                 o.put("intent", intent(p.item.id));
                 o.put("poster", f.isFile());
                 out.put(o);
+                shown.put(p.item.id, now);
             }
             File[] old = posters.listFiles();
             if (old != null) for (File f : old) if (!keep.contains(f.getName())) f.delete();
             JSONObject saved = new JSONObject();
+            saved.put("owner", owner);
+            saved.put("bucket", bucket);
+            saved.put("shown", new JSONObject(shown));
+            saved.put("cooldown", new JSONObject(cooldown));
+            saved.put("cooldownAt", cooldownAt);
             saved.put("label", moment.label());
             saved.put("weather", weather[0]);
             saved.put("updated", System.currentTimeMillis());
@@ -123,6 +140,20 @@ final class Refresh {
                 running = false;
             }
         }
+    }
+
+    /** Retain only a week of exposure history; no watch history is persisted here. */
+    private static Map<String, Long> recent(JSONObject json, long now) {
+        Map<String, Long> out = new HashMap<>();
+        if (json != null) {
+            java.util.Iterator<String> keys = json.keys();
+            while (keys.hasNext()) {
+                String id = keys.next();
+                long time = json.optLong(id, 0);
+                if (time > 0 && time <= now && now - time < 7L * 86400000) out.put(id, time);
+            }
+        }
+        return out;
     }
 
     /** The saved picks, or null before the first refresh. */
