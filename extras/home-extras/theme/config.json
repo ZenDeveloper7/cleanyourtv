@@ -1,0 +1,40 @@
+{
+  "dock_apps": [
+    "org.jellyfin.androidtv",
+    "com.google.android.youtube.tv",
+    "in.startv.hotstar",
+    "com.amazon.amazonvideo.livingroom",
+    "nl.giejay.android.tv.immich",
+    "tv.twitch.android.app"
+  ],
+  "columns": 6,
+  "fill_dock": false,
+  "app_library": false,
+  "tile_menu": true,
+  "background_color": "#090C14",
+  "wallpaper": true,
+  "wallpaper_rotation_minutes": 1,
+  "wallpaper_order": "sequential",
+  "wallpaper_dim": 0,
+  "wallpaper_captions": false,
+  "wallpaper_true_color": true,
+  "home_idle_clock_minutes": 2,
+  "cinematic_home": false,
+  "dock_title": false,
+  "dock_glass": true,
+  "dock_opacity": 65,
+  "icon_only_buttons": true,
+  "ambient_glow": false,
+  "app_glow": false,
+  "glow_style": "off",
+  "focus_overshoot": false,
+  "advanced_effects": true,
+  "continue_spotlight": true,
+  "screensaver_loops": true,
+  "weather_package": "io.github.sumyabazar1.weather",
+  "picks_package": "io.github.zendeveloper7.picks",
+  "watch_next_packages": [
+    "org.jellyfin.androidtv",
+    "in.startv.hotstar"
+  ]
+}
