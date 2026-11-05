@@ -4,7 +4,8 @@
     <uses-feature android:name="android.software.leanback" android:required="false" />
     <uses-feature android:name="android.hardware.touchscreen" android:required="false" />
 
-    <!-- Your own Jellyfin server on the home network: the library, your watch history and the posters. Nothing else. -->
+    <!-- Your own Jellyfin server on the home network: the library, your watch history and the posters. Also the https
+         posters of Continue watching rows (Hotstar's), fetched for the launcher, which has no network (WebPosters). -->
     <uses-permission android:name="android.permission.INTERNET" />
     <!-- Keeps the hourly refresh (PicksJob) scheduled after a restart. -->
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />

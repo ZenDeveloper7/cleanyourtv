@@ -58,6 +58,11 @@ final class WatchNext {
     private static final int BW = 1280, BH = 720;
     /** How long one poster may take to arrive; until then, and when it never does, the tile shows the app's icon. */
     static final long POSTER_TIMEOUT_MS = 20_000;
+    /**
+     * The picks add-on's provider authority (picks_package), which fetches https posters for the launcher; null
+     * leaves https posters out, as before. Set by MainActivity.
+     */
+    static volatile String webPosters;
     /** A poster bigger than this is not read: it is meant for a tile. */
     private static final int MAX_POSTER_BYTES = 8 * 1024 * 1024;
     /** Two daemon threads for posters: a provider that never answers holds a thread, never Home. */
@@ -304,7 +309,11 @@ final class WatchNext {
     private static Bitmap fetch(ContentResolver resolver, String uri, int W, int H) {
         Uri u = Uri.parse(uri);
         String scheme = u.getScheme() == null ? "" : u.getScheme().toLowerCase(Locale.ROOT);
-        if (!scheme.equals(ContentResolver.SCHEME_CONTENT) && !scheme.equals(ContentResolver.SCHEME_ANDROID_RESOURCE)) {
+        if (scheme.equals("https") && webPosters != null) {
+            // The launcher has no network: the picks add-on fetches the picture and hands it over (/web?u=...).
+            u = new Uri.Builder().scheme(ContentResolver.SCHEME_CONTENT).authority(webPosters).appendPath("web")
+                    .appendQueryParameter("u", uri).build();
+        } else if (!scheme.equals(ContentResolver.SCHEME_CONTENT) && !scheme.equals(ContentResolver.SCHEME_ANDROID_RESOURCE)) {
             return null;   // https posters need the network, which the launcher does not have
         }
         try (InputStream in = resolver.openInputStream(u)) {

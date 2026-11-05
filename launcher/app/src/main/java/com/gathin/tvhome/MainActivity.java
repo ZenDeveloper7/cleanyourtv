@@ -863,7 +863,10 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
                 && findViewById(R.id.spotlight) != null && findViewById(R.id.spotlightPanel) != null;
         if (spotlightEnabled) setUpSpotlight();
         // picks_package: suggestions take turns with Continue watching in the spotlight.
-        picksUri = spotlightEnabled ? Picks.uri(this, cfg.picksPackage) : null;
+        android.net.Uri picksProvider = Picks.uri(this, cfg.picksPackage);
+        picksUri = spotlightEnabled ? picksProvider : null;
+        // The same add-on fetches Continue watching's https posters (Hotstar's), which the launcher cannot.
+        WatchNext.webPosters = picksProvider == null ? null : picksProvider.getAuthority();
         if (weatherUri != null && cfg.dockRow) {
             // The weather's rain, snow, fog and rays stop at the dock, which moves with the grid's padding and scroll.
             grid.addOnLayoutChangeListener((v, l, t, r, b, ol, ot, or, ob) -> placeWeatherEdge());

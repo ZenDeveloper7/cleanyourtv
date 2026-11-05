@@ -35,8 +35,9 @@ off or when the weather has turned.
 |---|---|---|
 | Your home network (UDP broadcast, port 7359) | "who is JellyfinServer?" | Setup only, to find the server |
 | Your Jellyfin server | The API key; requests for the users, one user's watch history, the unwatched films and series, similar titles, and pictures | Setup, then about once an hour while the TV is on |
+| The address of a Continue watching poster (https only) | A plain picture request, no key or cookie | When the launcher shows a Continue watching row whose app publishes https posters (Hotstar), once per picture |
 
-Nothing else: no other host, no account, no analytics. The key, the server address and the picks stay in the app's
+Nothing else: no other request, no account, no analytics. The key, the server address and the picks stay in the app's
 own storage (backups off). Cleartext HTTP is allowed because most home servers have no certificate; use an `https://`
 address if yours has one.
 
@@ -44,7 +45,7 @@ address if yours has one.
 
 | Permission | Why |
 |---|---|
-| `INTERNET` | Your Jellyfin server on the home network |
+| `INTERNET` | Your Jellyfin server on the home network, and Continue watching's https posters for the launcher |
 | `RECEIVE_BOOT_COMPLETED` | Keeps the hourly refresh scheduled after a restart |
 
 ## For the launcher: the provider
@@ -53,6 +54,10 @@ address if yours has one.
 best first with the columns `id`, `title`, `subtitle`, `reason`, `label` (the moment, e.g. "Rainy Sunday evening"),
 `intent` (an `intent:` URI for the Jellyfin app's `StartupActivity` with `ItemId`), `poster` (a `content://` picture or
 empty) and `updated`. Read columns by name. A new set is announced with `notifyChange` on that URI.
+
+`content://io.github.zendeveloper7.picks.now/web?u=<https address>` opens the picture at that address, fetched and
+cached by this app, so the launcher (which has no network) can show Continue watching posters that apps publish as
+https addresses. It answers `com.gathin.tvhome` only, and https only.
 
 ## Build and install
 

@@ -18,13 +18,16 @@ import java.util.List;
  * Read-only, for the launcher's spotlight (com.gathin.tvhome.Picks): content://io.github.zendeveloper7.picks.now/now
  * gives the saved picks, best first, with the columns id, title, subtitle, reason, label (the moment they are for,
  * "Rainy Sunday evening"), intent (opens the item in the Jellyfin app), poster (a content:// picture, or empty) and
- * updated. /poster/{id} is that picture. A query never waits on the network: when the picks are older than an hour
+ * updated. /poster/{id} is that picture. /web?u={https address} is a Continue watching poster the launcher cannot
+ * fetch itself (it has no network), for the launcher only (WebPosters). A query never waits on the network: when the picks are older than an hour
  * (the TV was off) or the weather has turned since they were made, it answers with what it has and refreshes in the
  * background, then announces the change.
  */
 public final class PicksProvider extends ContentProvider {
     static final String AUTHORITY = "io.github.zendeveloper7.picks.now";
     static final Uri NOW_URI = Uri.parse("content://" + AUTHORITY + "/now");
+    /** The only app /web answers (Continue watching's https posters). */
+    private static final String LAUNCHER = "com.gathin.tvhome";
     private static final String[] COLUMNS = {"id", "title", "subtitle", "reason", "label", "intent", "poster", "updated"};
 
     @Override
@@ -63,6 +66,13 @@ public final class PicksProvider extends ContentProvider {
     @Override
     public ParcelFileDescriptor openFile(Uri uri, String mode) throws FileNotFoundException {
         List<String> seg = uri.getPathSegments();
+        if ("r".equals(mode) && seg.size() == 1 && "web".equals(seg.get(0))) {
+            // Continue watching's https posters, for the launcher only: no other app may make this one fetch.
+            if (!LAUNCHER.equals(getCallingPackage())) throw new FileNotFoundException("not for this caller");
+            File f = WebPosters.get(getContext(), uri.getQueryParameter("u"));
+            if (f == null) throw new FileNotFoundException("poster not available");
+            return ParcelFileDescriptor.open(f, ParcelFileDescriptor.MODE_READ_ONLY);
+        }
         if (!"r".equals(mode) || seg.size() != 2 || !"poster".equals(seg.get(0)) || !seg.get(1).matches("[0-9a-fA-F-]{8,64}")) {
             throw new FileNotFoundException(String.valueOf(uri));
         }

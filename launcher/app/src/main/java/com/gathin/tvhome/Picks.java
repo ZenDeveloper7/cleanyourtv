@@ -27,7 +27,7 @@ final class Picks {
 
     static final String META_DATA = "com.gathin.tvhome.picks";
     /** At most this many picks take turns in the spotlight. */
-    static final int MAX = 3;
+    static final int MAX = 5;
 
     /** One pick, with its picture already decoded (or null). */
     static final class Pick {

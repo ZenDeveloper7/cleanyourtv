@@ -474,7 +474,7 @@
          sun-*.jpg, cloud-*, fog-*, snow-*, storm-*). Empty leaves it off. A theme can set "weather_package". -->
     <string name="weather_package" translatable="false"></string>
     <!-- With continue_spotlight: the package of a picks app that suggests films and series (com.gathin.tvhome.picks
-         meta-data, see Picks.java), e.g. io.github.zendeveloper7.picks from addons/jellyfin-picks. Up to three picks
+         meta-data, see Picks.java), e.g. io.github.zendeveloper7.picks from addons/jellyfin-picks. Up to five picks
          take turns with Continue watching in the spotlight, every 20 seconds, with an Open button. Empty leaves it off.
          A theme can set "picks_package". -->
     <string name="picks_package" translatable="false"></string>
