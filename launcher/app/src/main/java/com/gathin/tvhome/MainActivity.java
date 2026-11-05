@@ -318,6 +318,8 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
     private ImageView spotlightArt;
     private TextView spotlightKicker, spotlightTitle, spotlightMeta, spotlightLeft, spotlightResume;
     private View spotlightScrim;
+    /** The carousel's dots, one per slide; null in a layout without them. */
+    private android.widget.LinearLayout spotlightDots;
     /** The row the spotlight shows, its key and its intent; null while it is hidden. */
     private String spotlightKey;
     private Intent spotlightIntent;
@@ -343,23 +345,73 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
         }
     }
 
-    /** The spotlight's slides: Continue watching first, then the picks; they take turns every SLIDE_MS. */
+    /**
+     * The spotlight's slides: Continue watching first, then the picks. A carousel: they take turns every SLIDE_MS,
+     * Left / Right on Resume / Open steps through them, and the dots show which one is on screen.
+     */
     private Slide continueSlide;
     private List<Slide> pickSlides = java.util.Collections.emptyList();
     private int slideIndex;
+    /** -1 or 1 while a slide stepped to with Left / Right is shown (its text slides in from that side), else 0. */
+    private int slideStep;
     private static final long SLIDE_MS = 20_000;
     private final Runnable nextSlide = new Runnable() {
         @Override
         public void run() {
             if (!resumed || spotlight == null) return;
-            // While Resume / Open has focus the slide stays, so OK opens what is on screen.
-            if (!spotlightResume.hasFocus()) {
-                slideIndex++;
-                showSlides();
-            }
+            slideIndex++;
+            showSlides();
             handler.postDelayed(this, SLIDE_MS);
         }
     };
+
+    /** Left / Right on the spotlight: the previous or next slide, and a full SLIDE_MS before it moves on by itself. */
+    private boolean stepSlide(int by) {
+        if (slideCount() < 2) return false;
+        slideIndex += by;
+        slideStep = by;
+        showSlides();
+        slideStep = 0;
+        handler.removeCallbacks(nextSlide);
+        if (resumed) handler.postDelayed(nextSlide, SLIDE_MS);
+        return true;
+    }
+
+    private int slideCount() {
+        return (continueSlide != null ? 1 : 0) + pickSlides.size();
+    }
+
+    /** One dot per slide, the current one filled and wider; hidden for a single slide. */
+    private void showDots(int count, int current) {
+        if (spotlightDots == null) return;
+        if (count < 2) {
+            spotlightDots.setVisibility(View.GONE);
+            return;
+        }
+        while (spotlightDots.getChildCount() > count) spotlightDots.removeViewAt(spotlightDots.getChildCount() - 1);
+        while (spotlightDots.getChildCount() < count) {
+            View dot = new View(this);
+            android.graphics.drawable.GradientDrawable d = new android.graphics.drawable.GradientDrawable();
+            d.setCornerRadius(3 * density);
+            dot.setBackground(d);
+            android.widget.LinearLayout.LayoutParams lp = new android.widget.LinearLayout.LayoutParams(
+                    Math.round(6 * density), Math.round(6 * density));
+            lp.setMarginEnd(Math.round(8 * density));
+            spotlightDots.addView(dot, lp);
+        }
+        for (int i = 0; i < count; i++) {
+            View dot = spotlightDots.getChildAt(i);
+            boolean on = i == current;
+            ((android.graphics.drawable.GradientDrawable) dot.getBackground()).setColor(on ? 0xFFFFFFFF : 0x66FFFFFF);
+            ViewGroup.LayoutParams lp = dot.getLayoutParams();
+            int w = Math.round((on ? 22 : 6) * density);
+            if (lp.width != w) {
+                lp.width = w;
+                dot.setLayoutParams(lp);
+            }
+        }
+        spotlightDots.setVisibility(View.VISIBLE);
+    }
     /** picks_package: the picks app's provider (null for none), and its loader. */
     private android.net.Uri picksUri;
     private final java.util.concurrent.ExecutorService picksLoader = java.util.concurrent.Executors.newSingleThreadExecutor();
@@ -1387,7 +1439,16 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
             hideGlass();
             hideHero();
         });
+        spotlightDots = findViewById(R.id.spotlightDots);
         spotlightResume.setOnKeyListener((v, code, event) -> {
+            if (code == KeyEvent.KEYCODE_DPAD_LEFT || code == KeyEvent.KEYCODE_DPAD_RIGHT) {
+                if (slideCount() < 2) return false;
+                if (event.getAction() == KeyEvent.ACTION_DOWN) {
+                    boolean rtl = v.getLayoutDirection() == View.LAYOUT_DIRECTION_RTL;
+                    stepSlide((code == KeyEvent.KEYCODE_DPAD_RIGHT) != rtl ? 1 : -1);
+                }
+                return true;
+            }
             if (code != KeyEvent.KEYCODE_DPAD_DOWN) return false;
             if (event.getAction() == KeyEvent.ACTION_DOWN && adapter.appCount() > 0) {
                 focusTile(Math.max(0, Math.min(lastFocused, Math.min(COLUMNS, adapter.appCount()) - 1)));
@@ -1496,6 +1557,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
         List<Slide> slides = new ArrayList<>();
         if (continueSlide != null) slides.add(continueSlide);
         slides.addAll(pickSlides);
+        showDots(slides.size(), slides.isEmpty() ? 0 : Math.floorMod(slideIndex, slides.size()));
         if (slides.isEmpty()) {
             boolean had = spotlightResume.hasFocus();
             spotlightKey = null;
@@ -1533,9 +1595,19 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
                 spotlight.setAlpha(0f);
                 spotlight.animate().alpha(1f).setDuration(420).start();
             } else {
-                // the next slide: the picture fades in over the last one's place
+                // the next slide: the picture fades in over the last one's place, the text slides in (from the side
+                // Left / Right came from, else from the end side, as a carousel moves on)
                 spotlightArt.setAlpha(0f);
                 spotlightArt.animate().alpha(1f).setDuration(600).start();
+                int from = slideStep != 0 ? slideStep : 1;
+                if (spotlightPanel.getLayoutDirection() == View.LAYOUT_DIRECTION_RTL) from = -from;
+                for (View t : new View[]{spotlightKicker, spotlightTitle, spotlightMeta}) {
+                    t.animate().cancel();
+                    t.setTranslationX(from * 48 * density);
+                    t.setAlpha(0f);
+                    t.animate().translationX(0f).alpha(1f).setDuration(380)
+                            .setInterpolator(new android.view.animation.DecelerateInterpolator()).start();
+                }
             }
         }
     }
