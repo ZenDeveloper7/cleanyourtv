@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Icon colour of the quiet look's top-bar buttons: a soft white until focused, dark on the focused white pill. -->
+<selector xmlns:android="http://schemas.android.com/apk/res/android">
+    <item android:state_focused="true" android:color="#FF111111" />
+    <item android:color="#B3FFFFFF" />
+</selector>

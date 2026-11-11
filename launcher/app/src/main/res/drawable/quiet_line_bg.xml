@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The quiet line (home_style quiet): no background until it has focus, then a soft light pill. -->
+<selector xmlns:android="http://schemas.android.com/apk/res/android">
+    <item android:state_focused="true">
+        <shape android:shape="rectangle">
+            <solid android:color="#2EFFFFFF" />
+            <stroke android:width="1.5dp" android:color="#E6FFFFFF" />
+            <corners android:radius="22dp" />
+        </shape>
+    </item>
+    <item android:drawable="@android:color/transparent" />
+</selector>

@@ -156,6 +156,89 @@
             android:importantForAccessibility="no" />
     </LinearLayout>
 
+    <!-- home_style quiet with continue_spotlight (Spotlight): the carousel as one focusable line of text above the
+         dock, with no artwork. Its place is set in code. -->
+    <LinearLayout
+        android:id="@+id/quietResume"
+        android:layout_width="wrap_content"
+        android:layout_height="44dp"
+        android:layout_marginStart="58dp"
+        android:paddingStart="14dp"
+        android:paddingEnd="16dp"
+        android:gravity="center_vertical"
+        android:orientation="horizontal"
+        android:background="@drawable/quiet_line_bg"
+        android:focusable="true"
+        android:nextFocusDown="@+id/grid"
+        android:visibility="gone">
+
+        <ImageView
+            android:id="@+id/quietResumeIcon"
+            android:layout_width="14dp"
+            android:layout_height="14dp"
+            android:src="@drawable/ic_play"
+            android:importantForAccessibility="no" />
+
+        <TextView
+            android:id="@+id/quietResumeTitle"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="12dp"
+            android:maxWidth="420dp"
+            android:singleLine="true"
+            android:ellipsize="end"
+            android:textColor="#FFFFFFFF"
+            android:textSize="17sp"
+            android:fontFamily="@string/font_regular" />
+
+        <TextView
+            android:id="@+id/quietResumeMeta"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="12dp"
+            android:maxWidth="360dp"
+            android:singleLine="true"
+            android:ellipsize="end"
+            android:textColor="#A6FFFFFF"
+            android:textSize="15sp"
+            android:fontFamily="@string/font_light" />
+
+        <FrameLayout
+            android:id="@+id/quietResumeTrack"
+            android:layout_width="72dp"
+            android:layout_height="2dp"
+            android:layout_marginStart="14dp"
+            android:background="#38FFFFFF">
+
+            <View
+                android:id="@+id/quietResumeProgress"
+                android:layout_width="0dp"
+                android:layout_height="match_parent"
+                android:background="#FFFFFFFF" />
+        </FrameLayout>
+
+        <TextView
+            android:id="@+id/quietResumeLeft"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="10dp"
+            android:singleLine="true"
+            android:textColor="#A6FFFFFF"
+            android:textSize="14sp"
+            android:fontFamily="@string/font_light" />
+
+        <!-- One dot per slide, the current one wider (built in code). -->
+        <LinearLayout
+            android:id="@+id/quietResumeDots"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="16dp"
+            android:gravity="center_vertical"
+            android:orientation="horizontal"
+            android:visibility="gone"
+            android:importantForAccessibility="no" />
+    </LinearLayout>
+
     <!-- Ambient glow in the colour of the focused dock app. -->
     <View
         android:id="@+id/ambient"
@@ -430,6 +513,120 @@
                             android:letterSpacing="0.14"
                             android:textAllCaps="true"
                             android:visibility="gone" />
+                    </LinearLayout>
+                </LinearLayout>
+
+                <!-- home_style quiet (HomeHeader): the weather as the big text, "greeting · time · date" on one line
+                     under it. Shown instead of the greeting and the clock's row; gone in the classic header. -->
+                <LinearLayout
+                    android:id="@+id/quietHeader"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="14dp"
+                    android:orientation="vertical"
+                    android:visibility="gone">
+
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="horizontal"
+                        android:baselineAligned="true">
+
+                        <TextView
+                            android:id="@+id/quietBig"
+                            android:shadowColor="#99000000"
+                            android:shadowRadius="14"
+                            android:shadowDy="2"
+                            android:gravity="left"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:singleLine="true"
+                            android:ellipsize="end"
+                            android:includeFontPadding="false"
+                            android:textColor="#FFFFFFFF"
+                            android:textSize="88sp"
+                            android:fontFamily="@string/font_extralight"
+                            android:letterSpacing="-0.03" />
+
+                        <TextView
+                            android:id="@+id/quietCondition"
+                            android:shadowColor="#99000000"
+                            android:shadowRadius="14"
+                            android:shadowDy="2"
+                            android:gravity="left"
+                            android:layout_width="0dp"
+                            android:layout_weight="1"
+                            android:layout_height="wrap_content"
+                            android:layout_marginStart="18dp"
+                            android:singleLine="true"
+                            android:ellipsize="end"
+                            android:textColor="#D9FFFFFF"
+                            android:textSize="28sp"
+                            android:fontFamily="@string/font_extralight"
+                            android:visibility="gone" />
+                    </LinearLayout>
+
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="10dp"
+                        android:layout_marginStart="4dp"
+                        android:orientation="horizontal">
+
+                        <TextView
+                            android:id="@+id/quietLead"
+                            android:shadowColor="#99000000"
+                            android:shadowRadius="14"
+                            android:shadowDy="2"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:layout_marginEnd="10dp"
+                            android:singleLine="true"
+                            android:textColor="#C7FFFFFF"
+                            android:textSize="16sp"
+                            android:fontFamily="@string/font_light"
+                            android:visibility="gone" />
+
+                        <TextClock
+                            android:id="@+id/quietTime"
+                            android:shadowColor="#99000000"
+                            android:shadowRadius="14"
+                            android:shadowDy="2"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:format12Hour="h:mm a"
+                            android:format24Hour="HH:mm"
+                            android:singleLine="true"
+                            android:textColor="#C7FFFFFF"
+                            android:textSize="16sp"
+                            android:fontFamily="@string/font_light" />
+
+                        <TextView
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:layout_marginStart="10dp"
+                            android:text="@string/quiet_separator"
+                            android:textColor="#80FFFFFF"
+                            android:textSize="16sp"
+                            android:fontFamily="@string/font_light"
+                            android:importantForAccessibility="no" />
+
+                        <TextClock
+                            android:id="@+id/quietDate"
+                            android:shadowColor="#99000000"
+                            android:shadowRadius="14"
+                            android:shadowDy="2"
+                            android:layout_width="0dp"
+                            android:layout_weight="1"
+                            android:layout_height="wrap_content"
+                            android:layout_marginStart="10dp"
+                            android:format12Hour="@string/date_format_home"
+                            android:format24Hour="@string/date_format_home"
+                            android:singleLine="true"
+                            android:ellipsize="end"
+                            android:textColor="#C7FFFFFF"
+                            android:textSize="16sp"
+                            android:fontFamily="@string/font_light" />
                     </LinearLayout>
                 </LinearLayout>
 

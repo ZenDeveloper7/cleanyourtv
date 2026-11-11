@@ -266,6 +266,15 @@ final class Config {
     /** The focus highlight's look (config.xml, glass_style): {@link #GLASS_DEFAULT}, {@link #GLASS_RIM} or {@link #GLASS_HALO}. */
     final String glassStyle;
 
+    /**
+     * Home's look (config.xml / theme home_style): {@link #HOME_QUIET}, the default, puts the weather in large text
+     * top left, a single Resume line above a dock with no band, and faint icon buttons; {@link #HOME_CLASSIC} keeps
+     * the clock header and the full spotlight. The quiet look needs the dock row and steps aside for cinematic_home
+     * and single_row, which have their own layouts.
+     */
+    final boolean quietHome;
+
+    static final String HOME_QUIET = "quiet", HOME_CLASSIC = "classic";
     static final String GLOW_RADIAL = "radial", GLOW_HORIZON = "horizon";
     static final String GLASS_DEFAULT = "glass", GLASS_RIM = "rim", GLASS_HALO = "halo";
     /** Show each rotating wallpaper's name from wallpapers/captions.txt (config.xml / theme wallpaper_captions). */
@@ -309,7 +318,9 @@ final class Config {
                    Map<String, Set<String>> wallpaperMoods, Map<String, List<String>> wallpaperDates, int wallpaperDatesSeconds, List<String> watchNextPackages, boolean gamepadPassthrough, boolean consumeVolumeKeys, boolean powerOnHome, boolean homeLongPressHome, boolean wifiStatusWarnings, List<String> topBarApps, boolean showGreeting, boolean headerWhite, boolean clockWallpaper, int clockWallpaperDim, boolean clockGlow, String glassStyle, boolean singleRow, boolean dockBandAll, boolean lunarDate, int lunarUtcOffset, boolean dateBelowClock, boolean vpnPill, String locale, boolean powerOnHomeAlways, boolean inputsConnectedOnly, boolean inputsCecStateOnly,
                    int openOnStartNetworkWait, boolean openOnStartOnWake, boolean iconOnlyVpn, String clockFormat, boolean backOpensClock, boolean glowSnap,
                    boolean continueSpotlight, boolean screensaverLoops, String weatherPackage,
-                   String picksPackage) {
+                   String picksPackage, String homeStyle) {
+        // First: the quiet look sets the dock and the top bar its own way, over the keys below.
+        this.quietHome = quietHome(homeStyle, dockRow, singleRow, cinematicHome);
         this.handleViewInputs = handleViewInputs;
         this.tileMenu = tileMenu;
         this.inputKeycodes = inputKeycodes;
@@ -349,21 +360,21 @@ final class Config {
         this.reducedMotion = reducedMotion;
         this.bootToLiveTv = bootToLiveTv;
         this.openOnStartChoice = openOnStartChoice;
-        this.dockTitle = dockTitle;
+        this.dockTitle = dockTitle && !quietHome;   // quiet: the name shows under the focused dock tile instead
         this.dockRow = dockRow;
         this.topMenu = topMenu;
         this.launcherSettingsButton = launcherSettingsButton;
         this.reorderButton = reorderButton;
         this.showNetworkPill = showNetworkPill;
         this.showInputsPill = showInputsPill;
-        this.iconOnlyButtons = iconOnlyButtons;
-        this.iconOnlyInputs = iconOnlyInputs;
+        this.iconOnlyButtons = iconOnlyButtons || quietHome;
+        this.iconOnlyInputs = iconOnlyInputs || quietHome;
         this.iconOnlyVpn = iconOnlyVpn;
         this.backOpensClock = backOpensClock;
         this.glowSnap = glowSnap;
         this.libraryButton = libraryButton;
         this.showLibraryPill = showLibraryPill;
-        this.wifiLabelWidth = wifiLabelWidth;
+        this.wifiLabelWidth = quietHome ? 0 : wifiLabelWidth;   // quiet: the Wi-Fi pill is an icon too
         this.alwaysShowNames = alwaysShowNames;
         this.wallpaperTrueColor = wallpaperTrueColor;
         this.focusOvershoot = focusOvershoot;
@@ -399,7 +410,7 @@ final class Config {
         this.homeIdleClockMinutes = homeIdleClockMinutes;
         this.dockGlass = dockGlass;
         this.dockEvenPadding = dockEvenPadding;
-        this.dockBand = dockBand;
+        this.dockBand = dockBand && !quietHome;   // quiet: the dock's tiles float on the wallpaper
         this.cinematicDots = cinematicDots;
         this.cinematicWhiteFocus = cinematicWhiteFocus;
         this.wifiStatusColor = wifiStatusColor;
@@ -433,6 +444,12 @@ final class Config {
         this.glowStyle = glowStyle(glowStyle);
         this.wallpaperCaptions = wallpaperCaptions;
         this.glassStyle = glassStyle(glassStyle);
+    }
+
+    /** home_style quiet (anything but classic), where the layout allows it: a dock row, not cinematic, not single_row. */
+    static boolean quietHome(String homeStyle, boolean dockRow, boolean singleRow, boolean cinematicHome) {
+        boolean quiet = homeStyle == null || !HOME_CLASSIC.equalsIgnoreCase(homeStyle.trim());
+        return quiet && dockRow && !singleRow && !cinematicHome;
     }
 
     /** A known glow_style, or radial (the default) for anything else. */
@@ -516,6 +533,7 @@ final class Config {
         String gameDay = res.getString(R.string.game_day).trim();
         String weatherPackage = res.getString(R.string.weather_package).trim();
         String picksPackage = res.getString(R.string.picks_package).trim();
+        String homeStyle = res.getString(R.string.home_style);
         boolean library = res.getBoolean(R.bool.app_library);
         boolean librarySelection = res.getBoolean(R.bool.app_library_selection);
         boolean libraryOkOpens = res.getBoolean(R.bool.library_ok_opens);
@@ -636,6 +654,7 @@ final class Config {
             gameDay = string(json, "game_day", gameDay);
             weatherPackage = string(json, "weather_package", weatherPackage).trim();
             picksPackage = string(json, "picks_package", picksPackage).trim();
+            homeStyle = string(json, "home_style", homeStyle);
             library = bool(json, "app_library", library);
             librarySelection = bool(json, "app_library_selection", librarySelection);
             libraryOkOpens = bool(json, "library_ok_opens", libraryOkOpens);
@@ -755,7 +774,7 @@ final class Config {
                 Math.max(0, Math.min(90, clockWallpaperDim)), clockGlow, glassStyle, singleRow && dockRow, dockBandAll, lunar, lunarOffset,
                 dateBelowClock, vpnPill, locale, powerOnHomeAlways, inputsConnectedOnly, inputsCecStateOnly,
                 Math.max(0, Math.min(600, openOnStartNetworkWait)), openOnStartOnWake, iconOnlyVpn, clockFormat, backOpensClock, glowSnap,
-                continueSpotlight, screensaverLoops, weatherPackage, picksPackage);
+                continueSpotlight, screensaverLoops, weatherPackage, picksPackage, homeStyle);
     }
 
     /**

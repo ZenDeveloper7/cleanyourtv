@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- A four-point star for a pick in the quiet line (home_style quiet). -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="20dp"
+    android:height="20dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M12,2.5c0.5,4.9 2.6,7 9.5,9.5c-6.9,2.5 -9,4.6 -9.5,9.5c-0.5,-4.9 -2.6,-7 -9.5,-9.5C9.4,9.5 11.5,7.4 12,2.5z" />
+</vector>

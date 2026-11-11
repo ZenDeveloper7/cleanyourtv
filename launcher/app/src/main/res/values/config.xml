@@ -500,6 +500,14 @@
          cinematic_home, single_row, and on festival days. Can also be set with "continue_spotlight": true in a
          theme's config.json. -->
     <bool name="continue_spotlight">false</bool>
+
+    <!-- Home's look. "quiet" (the default in this fork): the weather as the big text top left, with the greeting,
+         time and date on one small line under it; Inputs, Wi-Fi and Settings as faint icons; continue_spotlight as one
+         line of text above the dock (Left / Right step through Continue watching and the picks); the dock with no band,
+         each app's name shown under it only while it is focused. "classic": the clock header, the full spotlight with
+         its artwork, and the dock as the other keys set it. Quiet needs dock_row and steps aside for cinematic_home and
+         single_row. A theme can set "home_style". -->
+    <string name="home_style" translatable="false">quiet</string>
     <!-- Screensaver videos: with true, each time the screensaver starts it picks one of the theme's videos
          (screensaver/*.mp4, pushed by tools/theme.sh) at random, never the one it played last, and loops it muted under
          the clock until the screensaver ends. With no videos it is the usual clock. Can also be set with

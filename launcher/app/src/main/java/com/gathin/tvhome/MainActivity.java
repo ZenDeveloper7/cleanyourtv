@@ -82,7 +82,6 @@ import java.io.IOException;
 import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.Calendar;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -113,11 +112,6 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
     private boolean rtlAppGrid;
     private static final long MINUTE_MS = 60_000L;
     private static final long STATS_MS = 10_000L;
-    /**
-     * 2025-01-01. TVs without a clock battery boot at the epoch (08:00 in China) and keep it until network
-     * time arrives; the clock, date and greeting stay hidden before then.
-     */
-    private static final long TIME_VALID_AFTER_MS = 1_735_689_600_000L;
     private String liveTvPkg;
     /** Launcher settings' change count this Home was built with (see onResume). */
     private long settingsRevision;
@@ -180,8 +174,10 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
     private boolean heroShown;
     private boolean animations;
     private boolean advancedEffects;
-    private TextView greeting;
-    private View clockBlock;
+    /** The header block, top left: greeting, clock and dates, or the quiet look's weather (see HomeHeader). */
+    private HomeHeader header;
+    /** home_style quiet is on here (Config.quietHome, and this layout has its views). */
+    private boolean quiet;
     private View btnInputs;
     /** config show_inputs_pill: false keeps the Inputs pill hidden even when the TV has inputs. */
     private boolean showInputsPill = true;
@@ -190,11 +186,6 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
     private int wifiIcon;
     /** The pills have been filled in once; later resumes refresh them after the first frame. */
     private boolean pillsShown;
-    private TextView shamsiDate;
-    /** lunar_date: the lunisolar date under the date line, and the time zone it is computed for. */
-    private TextView lunarDate;
-    private boolean lunar;
-    private int lunarOffset;
     private TextView stats;
     private List<RaceWeekend.Race> raceCalendar;
     private View racePanel;
@@ -212,9 +203,6 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
     private boolean inputsConnectedOnly;
     /** config.xml inputs_cec_state_only: only CEC device rows show a connection state, bare HDMI ports none. */
     private boolean inputsCecStateOnly;
-    private boolean shamsi;
-    /** greeting_name: said after the greeting, which is shown in capitals. */
-    private String greetingName = "";
     /** Optional time-of-day backdrop (config.xml, sky_intensity); 0 keeps it hidden. */
     private SkyView sky;
     private String vpnApp;
@@ -270,7 +258,6 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
     private FestiveLamp lamp;
     private BellDrawable bell;
     private MarigoldDrawable marigold;
-    private int greetingColor;
     /** The day the petal shower last played, so it greets the first Home of each day only. */
     private static LocalDate lastPetalShower;
     /** When the birthday hearts last fell (uptime), so a return to Home replays them at most every ten minutes. */
@@ -314,114 +301,8 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
             handler.postDelayed(this, WEATHER_REFRESH_MS);
         }
     };
-    private View spotlight, spotlightPanel, spotlightProgress;
-    private ImageView spotlightArt;
-    private TextView spotlightKicker, spotlightTitle, spotlightMeta, spotlightLeft, spotlightResume;
-    private View spotlightScrim;
-    /** The carousel's dots, one per slide; null in a layout without them. */
-    private android.widget.LinearLayout spotlightDots;
-    /** The row the spotlight shows, its key and its intent; null while it is hidden. */
-    private String spotlightKey;
-    private Intent spotlightIntent;
-
-    /** One spotlight slide: Continue watching's newest row, or a pick (picks_package). */
-    private static final class Slide {
-        final String key, kicker, title, meta, left, button;
-        final float progress;   // below 0: no progress bar
-        final Intent intent;
-        final Bitmap art;
-
-        Slide(String key, String kicker, String title, String meta, String left, String button, float progress,
-              Intent intent, Bitmap art) {
-            this.key = key;
-            this.kicker = kicker;
-            this.title = title;
-            this.meta = meta;
-            this.left = left;
-            this.button = button;
-            this.progress = progress;
-            this.intent = intent;
-            this.art = art;
-        }
-    }
-
-    /**
-     * The spotlight's slides: Continue watching first, then the picks. A carousel: they take turns every SLIDE_MS,
-     * Left / Right on Resume / Open steps through them, and the dots show which one is on screen.
-     */
-    private Slide continueSlide;
-    private List<Slide> pickSlides = java.util.Collections.emptyList();
-    private int slideIndex;
-    /** -1 or 1 while a slide stepped to with Left / Right is shown (its text slides in from that side), else 0. */
-    private int slideStep;
-    private static final long SLIDE_MS = 20_000;
-    private final Runnable nextSlide = new Runnable() {
-        @Override
-        public void run() {
-            if (!resumed || spotlight == null) return;
-            slideIndex++;
-            showSlides();
-            handler.postDelayed(this, SLIDE_MS);
-        }
-    };
-
-    /** Left / Right on the spotlight: the previous or next slide, and a full SLIDE_MS before it moves on by itself. */
-    private boolean stepSlide(int by) {
-        if (slideCount() < 2) return false;
-        slideIndex += by;
-        slideStep = by;
-        showSlides();
-        slideStep = 0;
-        handler.removeCallbacks(nextSlide);
-        if (resumed) handler.postDelayed(nextSlide, SLIDE_MS);
-        return true;
-    }
-
-    private int slideCount() {
-        return (continueSlide != null ? 1 : 0) + pickSlides.size();
-    }
-
-    /** One dot per slide, the current one filled and wider; hidden for a single slide. */
-    private void showDots(int count, int current) {
-        if (spotlightDots == null) return;
-        if (count < 2) {
-            spotlightDots.setVisibility(View.GONE);
-            return;
-        }
-        while (spotlightDots.getChildCount() > count) spotlightDots.removeViewAt(spotlightDots.getChildCount() - 1);
-        while (spotlightDots.getChildCount() < count) {
-            View dot = new View(this);
-            android.graphics.drawable.GradientDrawable d = new android.graphics.drawable.GradientDrawable();
-            d.setCornerRadius(3 * density);
-            dot.setBackground(d);
-            android.widget.LinearLayout.LayoutParams lp = new android.widget.LinearLayout.LayoutParams(
-                    Math.round(6 * density), Math.round(6 * density));
-            lp.setMarginEnd(Math.round(8 * density));
-            spotlightDots.addView(dot, lp);
-        }
-        for (int i = 0; i < count; i++) {
-            View dot = spotlightDots.getChildAt(i);
-            boolean on = i == current;
-            ((android.graphics.drawable.GradientDrawable) dot.getBackground()).setColor(on ? 0xFFFFFFFF : 0x66FFFFFF);
-            ViewGroup.LayoutParams lp = dot.getLayoutParams();
-            int w = Math.round((on ? 22 : 6) * density);
-            if (lp.width != w) {
-                lp.width = w;
-                dot.setLayoutParams(lp);
-            }
-        }
-        spotlightDots.setVisibility(View.VISIBLE);
-    }
-    /** picks_package: the picks app's provider (null for none), and its loader. */
-    private android.net.Uri picksUri;
-    private final java.util.concurrent.ExecutorService picksLoader = java.util.concurrent.Executors.newSingleThreadExecutor();
-    private final android.database.ContentObserver picksObserver = new android.database.ContentObserver(new Handler(Looper.getMainLooper())) {
-        @Override
-        public void onChange(boolean selfChange) {
-            if (resumed) refreshPicks();
-        }
-    };
-    private boolean picksObserving;
+    /** continue_spotlight's carousel above the dock (full or quiet line); null while it is off. */
+    private Spotlight spotlight;
     private static final long HEARTS_GAP_MS = 10 * 60_000L;
     /** boot_to_live_tv: open the Live TV app on the first Home of each boot. */
     private boolean bootToLiveTv;
@@ -576,7 +457,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
     private final BroadcastReceiver timeReceiver = new BroadcastReceiver() {
         @Override
         public void onReceive(Context context, Intent intent) {
-            updateClockVisibility();
+            header.updateClockVisibility();
             clockRefresh.start();   // the wall clock was set: line the redraw up with the new minute
         }
     };
@@ -590,7 +471,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
                 recreate();
                 return;
             }
-            updateGreeting();
+            header.update();
             updatePanel();
             // The pill follows the network callbacks and each return to Home; only the festive light follows the
             // signal level, so only it needs this minute's binder calls (about 7 ms on the UI thread).
@@ -698,39 +579,11 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
         // dock_title false: the name above the dock (and the cinematic lines under it) never shows; the glow
         // still follows the dock.
         if (!cfg.dockTitle) hero.setVisibility(View.GONE);
-        greeting = findViewById(R.id.greeting);
-        clockBlock = findViewById(R.id.leftBlock);
-        clockRefresh = new ClockRefresh(clockBlock);
-        greetingColor = greeting.getCurrentTextColor();
-        if (!cfg.showGreeting) greeting.setVisibility(View.GONE);
-        // Keep the other header layouts as designed: their extra lines change the block's centre.
-        if (!cfg.showGreeting && !cfg.dateBelowClock && !cfg.shamsiDate && !cfg.lunarDate
-                && !cfg.topMenu && !getResources().getBoolean(R.bool.rtl_menu_bar)) {
-            centerCompactHeader();
-        }
-        if (cfg.headerWhite) {
-            // The clock's own white for the date and the line before it, instead of their dimmed whites.
-            ((TextView) findViewById(R.id.date)).setTextColor(Color.WHITE);
-            findViewById(R.id.clockDivider).setBackgroundColor(Color.WHITE);
-        }
-        if (getResources().getBoolean(R.bool.rtl_menu_bar)) {
-            // Center Hebrew greetings over the numeric time, independent of a visible AM/PM label. The clock's row
-            // is watched too: date_below_clock can move the whole row right under a wider date.
-            View clock = findViewById(R.id.clock);
-            View clockRow = (View) clock.getParent();
-            View.OnLayoutChangeListener centerGreeting = (v, l, t, right, bottom, ol, ot, or, ob) -> {
-                ViewGroup.LayoutParams params = greeting.getLayoutParams();
-                if (params.width != clock.getWidth()) {
-                    params.width = clock.getWidth();
-                    greeting.setLayoutParams(params);
-                }
-                greeting.setTranslationX(clockRow.getLeft() + clock.getLeft());
-            };
-            clock.addOnLayoutChangeListener(centerGreeting);
-            clockRow.addOnLayoutChangeListener(centerGreeting);
-        }
+        // home_style quiet, where this layout has its views (the Hebrew layout-iw copy keeps the classic look).
+        quiet = cfg.quietHome && HomeHeader.quietAvailable(this);
+        header = new HomeHeader(this, handler, cfg, festival, festive, quiet);
+        clockRefresh = new ClockRefresh(header.block());
         btnWifi = findViewById(R.id.btnWifi);
-        shamsiDate = findViewById(R.id.shamsiDate);
         stats = findViewById(R.id.stats);
         raceCalendar = cfg.raceCalendar;
         racePanel = findViewById(R.id.racePanel);
@@ -745,24 +598,6 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
         showStats = cfg.showStats;
         inputsConnectedOnly = cfg.inputsConnectedOnly;
         inputsCecStateOnly = cfg.inputsCecStateOnly;
-        shamsi = cfg.shamsiDate;
-        lunarDate = findViewById(R.id.lunarDate);
-        lunar = cfg.lunarDate;
-        lunarOffset = Lunar.offsetFor(cfg.lunarUtcOffset, Locale.getDefault());
-        if (lunar) lunarDate.setVisibility(View.VISIBLE);
-        greetingName = cfg.greetingName;
-        if (cfg.dateBelowClock) moveDateBelowClock();
-        if (cfg.dateBelowClock && cfg.iconOnlyButtons && !cfg.topMenu
-                && !getResources().getBoolean(R.bool.rtl_menu_bar)) {
-            alignDateBelowIconsWithClock();
-        }
-        if (shamsi) {
-            shamsiDate.setVisibility(View.VISIBLE);
-            TextView date = findViewById(R.id.date);
-            date.setTextSize(11f);
-            lunarDate.setTextSize(11f);
-            date.setPadding(0, (int) (4 * density), 0, 0);
-        }
         vpnApp = cfg.vpnApp;
         vpnPill = cfg.vpnPill && !cfg.topMenu;
         btnVpn = findViewById(R.id.btnVpn);
@@ -860,11 +695,13 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
         grid.setAdapter(adapter);
         // A layout without the spotlight's views (the Hebrew layout-iw copy) leaves the feature off instead of crashing.
         spotlightEnabled = cfg.continueSpotlight && !cinematic && cfg.dockRow && !cfg.singleRow
-                && findViewById(R.id.spotlight) != null && findViewById(R.id.spotlightPanel) != null;
-        if (spotlightEnabled) setUpSpotlight();
+                && Spotlight.available(this, quiet);
         // picks_package: suggestions take turns with Continue watching in the spotlight.
         android.net.Uri picksProvider = Picks.uri(this, cfg.picksPackage);
-        picksUri = spotlightEnabled ? picksProvider : null;
+        if (spotlightEnabled) {
+            spotlight = new Spotlight(this, handler, root, grid, picksProvider, quiet, animations && !reducedMotion,
+                    quiet ? null : scrimDrawable(), spotlightHost());
+        }
         // The same add-on fetches Continue watching's https posters (Hotstar's), which the launcher cannot.
         WatchNext.webPosters = picksProvider == null ? null : picksProvider.getAuthority();
         if (weatherUri != null && cfg.dockRow) {
@@ -947,7 +784,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
         // out by the time it reaches the clock. The grid's own offset is read, so a jump (Home, a restored focus)
         // lands right too.
         if (gameDay != null) {
-            View clockBlock = findViewById(R.id.leftBlock);
+            View clockBlock = header.block();
             grid.addOnScrollListener(new RecyclerView.OnScrollListener() {
                 @Override
                 public void onScrolled(@NonNull RecyclerView rv, int dx, int dy) {
@@ -1029,6 +866,15 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
         iconOnlyButtons = cfg.iconOnlyButtons;
         topMenu = cfg.topMenu;
         wifiIconOnly = iconOnlyButtons && cfg.wifiLabelWidth <= 0;
+        if (quiet) {
+            // Faint icons with no pill around them until focused; the Wi-Fi colours below start from this ink.
+            ColorStateList ink = getColorStateList(R.color.quiet_button_ink);
+            for (TextView button : new TextView[]{(TextView) btnInputs, btnWifi, btnVpn, (TextView) btnReorder,
+                    (TextView) btnLibraryTop, (TextView) btnSettings}) {
+                button.setBackgroundResource(R.drawable.quiet_button_bg);
+                button.setCompoundDrawableTintList(ink);
+            }
+        }
         if (cfg.wifiStatusColor) {
             wifiPlainTint = btnWifi.getCompoundDrawableTintList();
             wifiOnlineTint = getColorStateList(R.color.pill_icon_online);
@@ -1256,7 +1102,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
         } else {
             registerReceiver(timeReceiver, timeFilter);
         }
-        updateClockVisibility();
+        header.updateClockVisibility();
         clockRefresh.start();   // with timeReceiver: while Home is visible, paused or not
         tileRefresh.onStart();
     }
@@ -1265,21 +1111,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
     protected void onResume() {
         super.onResume();
         resumed = true;
-        if (picksUri != null) {
-            if (!picksObserving) {
-                try {
-                    getContentResolver().registerContentObserver(picksUri, false, picksObserver);
-                    picksObserving = true;
-                } catch (Exception ignored) {
-                    // a picks app without notifications: read on each return to Home
-                }
-            }
-            refreshPicks();
-        }
-        if (spotlight != null) {
-            handler.removeCallbacks(nextSlide);
-            handler.postDelayed(nextSlide, SLIDE_MS);
-        }
+        if (spotlight != null) spotlight.onResume();
         if (weatherUri != null) {
             if (!weatherObserving) {
                 try {
@@ -1330,7 +1162,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
                 break;
         }
         if (openLiveTvAfterBoot()) return;
-        updateGreeting();
+        header.update();
         updatePanel();
         // Back from an app opened from its tile, focus is still on that tile, so the cinematic "Last opened" line kept
         // the time from before this launch ("2 days ago" right after opening it). Refresh it.
@@ -1388,12 +1220,12 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
                 List<String> keys = AppAdapter.watchKeys(rows);
                 WatchNext.Row lead = spot && !rows.isEmpty() ? rows.get(0) : null;
                 List<WatchNext.Row> rest = lead == null ? rows : rows.subList(1, rows.size());
-                if (spotlightEnabled) applySpotlight(lead, lead == null ? null : WatchNext.backdrop(app, lead), appLabel(app, lead));
+                if (spotlightEnabled) spotlight.setContinue(lead, lead == null ? null : WatchNext.backdrop(app, lead), Spotlight.appLabel(app, lead));
                 // First the tiles from the poster cache (icons for the rest), then the missing posters, slowly.
                 if (!keys.equals(watchNextKeys)) applyWatchNext(keys, AppAdapter.watchTiles(app, rest, 0xFFFFFFFF));
                 if (WatchNext.fetchMissing(app, rows)) applyWatchNext(keys, AppAdapter.watchTiles(app, rest, 0xFFFFFFFF));
                 if (lead != null && WatchNext.fetchBackdrop(app, lead)) {
-                    applySpotlight(lead, WatchNext.backdrop(app, lead), appLabel(app, lead));
+                    spotlight.setContinue(lead, WatchNext.backdrop(app, lead), Spotlight.appLabel(app, lead));
                 }
                 runOnUiThread(() -> watchNextLoading = false);
             });
@@ -1417,222 +1249,39 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
         });
     }
 
-    // ---- Continue watching spotlight (continue_spotlight) -----------------------------------------
+    // ---- Continue watching spotlight (continue_spotlight, see Spotlight) ------------------------------
 
-    private void setUpSpotlight() {
-        spotlight = findViewById(R.id.spotlight);
-        spotlightArt = findViewById(R.id.spotlightArt);
-        spotlightPanel = findViewById(R.id.spotlightPanel);
-        spotlightProgress = findViewById(R.id.spotlightProgress);
-        spotlightKicker = findViewById(R.id.spotlightKicker);
-        spotlightTitle = findViewById(R.id.spotlightTitle);
-        spotlightMeta = findViewById(R.id.spotlightMeta);
-        spotlightLeft = findViewById(R.id.spotlightLeft);
-        spotlightResume = findViewById(R.id.spotlightResume);
-        // The same scrim as the cinematic shelf: dark on the text's side and towards the dock.
-        spotlightScrim = findViewById(R.id.spotlightScrim);
-        spotlightScrim.setBackground(scrimDrawable());
-        spotlightArt.forceHasOverlappingRendering(false);
-        spotlightResume.setOnClickListener(v -> {
-            if (spotlightIntent == null) return;
-            try {
-                startActivity(spotlightIntent);
-            } catch (Exception e) {
-                android.widget.Toast.makeText(this, getString(R.string.cant_open, spotlightTitle.getText()),
-                        android.widget.Toast.LENGTH_SHORT).show();
+    private Spotlight.Host spotlightHost() {
+        return new Spotlight.Host() {
+            @Override public boolean isResumed() { return resumed; }
+
+            @Override public int readerSession() { return readerSession; }
+
+            @Override public boolean festivalToday() { return festival.active(LocalDate.now()); }
+
+            @Override public void onSpotlightFocused() {
+                hideGlass();
+                hideHero();
             }
-        });
-        spotlightResume.setOnFocusChangeListener((v, has) -> {
-            if (!has) return;
-            hideGlass();
-            hideHero();
-        });
-        spotlightDots = findViewById(R.id.spotlightDots);
-        spotlightResume.setOnKeyListener((v, code, event) -> {
-            if (code == KeyEvent.KEYCODE_DPAD_LEFT || code == KeyEvent.KEYCODE_DPAD_RIGHT) {
-                if (slideCount() < 2) return false;
-                if (event.getAction() == KeyEvent.ACTION_DOWN) {
-                    boolean rtl = v.getLayoutDirection() == View.LAYOUT_DIRECTION_RTL;
-                    stepSlide((code == KeyEvent.KEYCODE_DPAD_RIGHT) != rtl ? 1 : -1);
-                }
-                return true;
+
+            @Override public void focusDock(boolean first) {
+                if (adapter.appCount() == 0) return;
+                focusTile(first ? 0 : Math.max(0, Math.min(lastFocused, Math.min(COLUMNS, adapter.appCount()) - 1)));
             }
-            if (code != KeyEvent.KEYCODE_DPAD_DOWN) return false;
-            if (event.getAction() == KeyEvent.ACTION_DOWN && adapter.appCount() > 0) {
-                focusTile(Math.max(0, Math.min(lastFocused, Math.min(COLUMNS, adapter.appCount()) - 1)));
+
+            @Override public boolean focusTopBar() {
+                View first = btnInputs.getVisibility() == View.VISIBLE ? btnInputs : firstTopButton();
+                return first.getVisibility() == View.VISIBLE && first.requestFocus();
             }
-            return true;
-        });
-        // The panel sits above the dock, wherever the grid's padding puts it.
-        grid.addOnLayoutChangeListener((v, l, t, r, b, ol, ot, or, ob) -> placeSpotlight());
-        spotlightPanel.addOnLayoutChangeListener((v, l, t, r, b, ol, ot, or, ob) -> placeSpotlight());
-        // Below the dock the grid scrolls up: the panel goes with it and fades, so the dock never covers it.
-        grid.addOnScrollListener(new RecyclerView.OnScrollListener() {
-            @Override
-            public void onScrolled(RecyclerView rv, int dx, int dy) {
-                placeSpotlight();
+
+            @Override public float titleRoomPx() {
+                return hero.getVisibility() == View.VISIBLE ? hero.getHeight() + 40 * density : 0f;
             }
-        });
-    }
 
-    /** Bottom of the panel 32dp above the dock's top (above the dock's name too, when dock_title shows one). */
-    private void placeSpotlight() {
-        if (spotlightPanel == null || grid.getHeight() == 0) return;
-        Rect r = new Rect(0, 0, grid.getWidth(), grid.getHeight());
-        root.offsetDescendantRectToMyCoords(grid, r);
-        float dockTop = r.top + grid.getPaddingTop();
-        float gap = 32 * density + (hero.getVisibility() == View.VISIBLE ? hero.getHeight() + 40 * density : 0);
-        int scrolled = grid.computeVerticalScrollOffset();
-        float y = Math.max(0f, dockTop - gap - spotlightPanel.getHeight()) - scrolled;
-        if (spotlightPanel.getY() != y) spotlightPanel.setY(y);
-        float alpha = Math.max(0f, 1f - scrolled / (120 * density));
-        spotlightPanel.setAlpha(alpha);
-        boolean shown = spotlight.getVisibility() == View.VISIBLE;
-        spotlightPanel.setVisibility(!shown ? View.GONE : alpha > 0f ? View.VISIBLE : View.INVISIBLE);
-        // The weather's rain and snow leave the text's area (with a margin) alone, so nothing falls through the letters.
-        if (weatherLayer != null) {
-            if (shown && alpha > 0f) {
-                int m = Math.round(24 * density);
-                Rect hole = new Rect(Math.round(spotlightPanel.getX()) - m, Math.round(y) - m,
-                        Math.round(spotlightPanel.getX() + spotlightPanel.getWidth()) + m, Math.round(y + spotlightPanel.getHeight()) + m);
-                weatherLayer.setEffectsHole(hole);
-            } else {
-                weatherLayer.setEffectsHole(null);
+            @Override public void setEffectsHole(Rect hole) {
+                if (weatherLayer != null) weatherLayer.setEffectsHole(hole);
             }
-        }
-    }
-
-    /** The app's name for the spotlight's kicker line, read off the main thread with the rows. */
-    private static String appLabel(android.content.Context app, WatchNext.Row row) {
-        if (row == null) return "";
-        try {
-            android.content.pm.PackageManager pm = app.getPackageManager();
-            return pm.getApplicationLabel(pm.getApplicationInfo(row.pkg, 0)).toString();
-        } catch (Exception e) {
-            return "";
-        }
-    }
-
-    /** Continue watching's newest row for the spotlight (art may be null), or none for null. */
-    private void applySpotlight(WatchNext.Row row, Bitmap art, String appName) {
-        runOnUiThread(() -> {
-            if (isDestroyed() || spotlight == null) return;
-            Intent intent = row == null ? null : WatchNext.intent(row);
-            continueSlide = intent == null ? null : new Slide(
-                    row.key() + "/" + Math.round(row.progress() * 50) + "/" + (art != null),
-                    appName.isEmpty() ? getString(R.string.spotlight_up_next) : getString(R.string.spotlight_kicker, appName),
-                    row.title, row.episode, spotlightLeft(row), getString(R.string.spotlight_resume),
-                    row.progress(), intent, art);
-            showSlides();
-        });
-    }
-
-    /** The picks (picks_package) for the spotlight, read off the main thread. Not on festival days. */
-    private void refreshPicks() {
-        final android.net.Uri uri = picksUri;
-        if (uri == null || festival.active(LocalDate.now())) {
-            pickSlides = java.util.Collections.emptyList();
-            showSlides();
-            return;
-        }
-        final android.content.Context app = getApplicationContext();
-        if (!resumed) return;
-        final int session = readerSession;
-        try {
-            picksLoader.execute(() -> {
-                if (session != readerSession) return;
-                List<Picks.Pick> picks = Picks.read(app, uri, 1280, 720);
-                runOnUiThread(() -> {
-                    if (session != readerSession || isDestroyed()) return;
-                    List<Slide> slides = new ArrayList<>();
-                    for (Picks.Pick p : picks) {
-                        slides.add(new Slide("pick/" + p.id + "/" + p.label + "/" + p.updated + "/" + (p.art != null),
-                                p.label.isEmpty() ? getString(R.string.spotlight_for_you_plain)
-                                        : getString(R.string.spotlight_for_you, p.label),
-                                p.title, p.reason, p.subtitle, getString(R.string.spotlight_open), -1f, p.intent, p.art));
-                    }
-                    pickSlides = slides;
-                    showSlides();
-                });
-            });
-        } catch (java.util.concurrent.RejectedExecutionException ignored) {
-        }
-    }
-
-    /** Shows the current slide, or hides the spotlight when there is none. */
-    private void showSlides() {
-        if (isDestroyed() || spotlight == null) return;
-        List<Slide> slides = new ArrayList<>();
-        if (continueSlide != null) slides.add(continueSlide);
-        slides.addAll(pickSlides);
-        showDots(slides.size(), slides.isEmpty() ? 0 : Math.floorMod(slideIndex, slides.size()));
-        if (slides.isEmpty()) {
-            boolean had = spotlightResume.hasFocus();
-            spotlightKey = null;
-            spotlightIntent = null;
-            spotlight.setVisibility(View.GONE);
-            spotlightPanel.setVisibility(View.GONE);
-            spotlightArt.setImageDrawable(null);
-            if (had && adapter.appCount() > 0) focusTile(0);
-            return;
-        }
-        Slide slide = slides.get(Math.floorMod(slideIndex, slides.size()));
-        if (slide.key.equals(spotlightKey)) return;
-        boolean fresh = spotlight.getVisibility() != View.VISIBLE;
-        spotlightKey = slide.key;
-        spotlightIntent = slide.intent;
-        spotlightKicker.setText(slide.kicker);
-        spotlightTitle.setText(slide.title);
-        spotlightMeta.setText(slide.meta);
-        spotlightMeta.setVisibility(slide.meta.isEmpty() ? View.GONE : View.VISIBLE);
-        spotlightLeft.setText(slide.left);
-        spotlightResume.setText(slide.button);
-        if (slide.progress >= 0f) {
-            ViewGroup.LayoutParams lp = spotlightProgress.getLayoutParams();
-            lp.width = Math.round(220 * density * Math.max(0.03f, slide.progress));
-            spotlightProgress.setLayoutParams(lp);
-        }
-        ((View) spotlightProgress.getParent()).setVisibility(slide.progress > 0f ? View.VISIBLE : View.GONE);
-        spotlightArt.setImageBitmap(slide.art);
-        spotlightArt.setVisibility(slide.art != null ? View.VISIBLE : View.GONE);
-        spotlightScrim.setVisibility(slide.art != null ? View.VISIBLE : View.GONE);   // no art: the wallpaper as it is
-        spotlight.setVisibility(View.VISIBLE);
-        placeSpotlight();   // the text is its own view: show it where the scroll allows
-        if (animations && !reducedMotion) {
-            if (fresh) {
-                spotlight.setAlpha(0f);
-                spotlight.animate().alpha(1f).setDuration(420).start();
-            } else {
-                // the next slide: the picture fades in over the last one's place, the text slides in (from the side
-                // Left / Right came from, else from the end side, as a carousel moves on)
-                spotlightArt.setAlpha(0f);
-                spotlightArt.animate().alpha(1f).setDuration(600).start();
-                int from = slideStep != 0 ? slideStep : 1;
-                if (spotlightPanel.getLayoutDirection() == View.LAYOUT_DIRECTION_RTL) from = -from;
-                for (View t : new View[]{spotlightKicker, spotlightTitle, spotlightMeta}) {
-                    t.animate().cancel();
-                    t.setTranslationX(from * 48 * density);
-                    t.setAlpha(0f);
-                    t.animate().translationX(0f).alpha(1f).setDuration(380)
-                            .setInterpolator(new android.view.animation.DecelerateInterpolator()).start();
-                }
-            }
-        }
-    }
-
-    /** "42 min left", "1 h 12 min left", or "Up next" for a next-episode row; "" when the length is unknown. */
-    private String spotlightLeft(WatchNext.Row row) {
-        String left;
-        if (row.type == WatchNext.TYPE_NEXT) {
-            left = getString(R.string.spotlight_up_next);
-        } else if (row.duration > 0 && row.position > 0) {
-            long min = Math.max(1, (row.duration - row.position + 59_999) / 60_000);
-            left = min >= 60 ? getString(R.string.spotlight_left_hours, (int) (min / 60), (int) (min % 60))
-                    : getString(R.string.spotlight_left_min, (int) min);
-        } else {
-            left = "";
-        }
-        return left;
+        };
     }
 
     // ---- weather (weather_package) ----------------------------------------------------------------
@@ -1666,7 +1315,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
         weatherLayer.setVisibility(plain ? View.GONE : View.VISIBLE);
         weatherLayer.setWeather(plain ? null : weatherNow.kind, !plain && weatherNow.day);
         wallpaperPlayer.setWeather(plain ? null : weatherNow.kind);
-        updateGreeting();
+        header.setWeather(weatherNow);
     }
 
     /** The weather effects end at the top of the dock's glass band (DockDecoration draws it above the tiles). */
@@ -1676,16 +1325,6 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
         root.offsetDescendantRectToMyCoords(grid, r);
         int dockTop = r.top + grid.getPaddingTop() - grid.computeVerticalScrollOffset();
         weatherLayer.setEffectsBottom(Math.max(1, dockTop - Math.round(6 * density)));
-    }
-
-    /** "Rainy afternoon · 24°" in English, "<the usual greeting> · 24°" in other languages; null without a reading. */
-    private String weatherGreeting(int res, String lang) {
-        if (weatherNow == null) return null;
-        String temp = Math.round(weatherNow.tempC) + "°";
-        if (!"en".equals(lang)) return getString(res) + " · " + temp;
-        String part = res == R.string.good_morning ? "morning" : res == R.string.good_afternoon ? "afternoon"
-                : res == R.string.good_evening ? "evening" : "night";
-        return Weather.adjective(weatherNow.kind, weatherNow.day) + " " + part + " · " + temp;
     }
 
     /** Launcher settings' change count (Config.SETTINGS_REVISION_KEY); onResume rebuilds Home when it moved. */
@@ -1848,11 +1487,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
         resumed = false;
         readerSession++;   // results of reads still running are dropped
         handler.removeCallbacks(weatherTick);
-        handler.removeCallbacks(nextSlide);
-        if (picksObserving) {
-            getContentResolver().unregisterContentObserver(picksObserver);
-            picksObserving = false;
-        }
+        if (spotlight != null) spotlight.onPause();
         if (weatherLayer != null) weatherLayer.stop();
         if (weatherObserving) {
             getContentResolver().unregisterContentObserver(weatherObserver);
@@ -1889,7 +1524,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
         started = false;
         unregisterReceiver(timeReceiver);
         clockRefresh.stop();
-        handler.removeCallbacks(clockCheck);
+        header.stop();
         stopped = true;
         tileRefresh.onStop();
     }
@@ -1936,8 +1571,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
         watchNextLoader.shutdownNow();
         readerSession++;
         weatherLoader.shutdownNow();
-        picksLoader.shutdownNow();
-        handler.removeCallbacks(nextSlide);
+        if (spotlight != null) spotlight.onDestroy();
         handler.removeCallbacks(weatherTick);
         if (gameDay != null) gameDay.shutdown();
         unregisterReceiver(packageReceiver);
@@ -3016,8 +2650,8 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
                     rtlAppGrid, keyCode == KeyEvent.KEYCODE_DPAD_LEFT);
         }
         if (keyCode == KeyEvent.KEYCODE_DPAD_UP) {
-            if (position < COLUMNS && spotlightIntent != null && spotlightPanel.getVisibility() == View.VISIBLE) {
-                spotlightResume.requestFocus();             // dock row under the spotlight: Up goes to Resume
+            if (position < COLUMNS && spotlight != null && spotlight.takeFocusFromDock()) {
+                // dock row under the spotlight: Up goes to Resume
                 grid.playSoundEffect(SoundEffectConstants.NAVIGATION_UP);
                 return true;
             }
@@ -3042,77 +2676,6 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
         libraryFocusPending = false;
         hideGlass();
         hideHero();
-    }
-
-    /**
-     * date_below_clock: the date column moves to its own line under the clock, in the vertical LinearLayout that holds
-     * the clock's row, and the line between them goes. In Hebrew (rtl_menu_bar) the date and the clock's row sit right.
-     */
-    private void moveDateBelowClock() {
-        View column = (View) findViewById(R.id.date).getParent();
-        View clockRow = (View) findViewById(R.id.clock).getParent();
-        LinearLayout clockColumn = (LinearLayout) clockRow.getParent();
-        ((ViewGroup) column.getParent()).removeView(column);
-        findViewById(R.id.clockDivider).setVisibility(View.GONE);
-        // Its own width, not the column's: in Hebrew the column is only as wide as the clock.
-        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        lp.topMargin = Math.round(4 * density);
-        if (getResources().getBoolean(R.bool.rtl_menu_bar)) {
-            // Date and clock flush right; the greeting stays left and follows the clock by translation.
-            lp.gravity = Gravity.RIGHT;
-            ((LinearLayout.LayoutParams) clockRow.getLayoutParams()).gravity = Gravity.RIGHT;
-        }
-        clockColumn.addView(column, clockColumn.indexOfChild(clockRow) + 1, lp);
-        // The column now wraps its texts, so they must wrap too: a match_parent TextView does not ask for a new
-        // layout when its text gets longer, and the column kept the width of the day before ("TUESDAY 27 OCTOB…").
-        ViewGroup texts = (ViewGroup) column;
-        for (int i = 0; i < texts.getChildCount(); i++) {
-            View text = texts.getChildAt(i);
-            LinearLayout.LayoutParams textLp = (LinearLayout.LayoutParams) text.getLayoutParams();
-            textLp.width = ViewGroup.LayoutParams.WRAP_CONTENT;
-            // Keep each line where its own gravity put it (right in Hebrew) now that it no longer fills the column.
-            textLp.gravity = ((TextView) text).getGravity() & Gravity.HORIZONTAL_GRAVITY_MASK;
-            text.setLayoutParams(textLp);
-        }
-    }
-
-    /** Centre the one-row header when the greeting and extra date lines are absent (#2265). */
-    private void centerCompactHeader() {
-        LinearLayout clockRow = (LinearLayout) findViewById(R.id.clock).getParent();
-        clockRow.setGravity(Gravity.CENTER_VERTICAL);
-        clockRow.setBaselineAligned(false);
-        View[] columns = {findViewById(R.id.clockDivider), (View) findViewById(R.id.date).getParent()};
-        for (View column : columns) {
-            LinearLayout.LayoutParams lp = (LinearLayout.LayoutParams) column.getLayoutParams();
-            lp.gravity = Gravity.CENTER_VERTICAL;
-            lp.bottomMargin = 0;
-            column.setLayoutParams(lp);
-        }
-        LinearLayout buttons = findViewById(R.id.topButtons);
-        RelativeLayout.LayoutParams lp = (RelativeLayout.LayoutParams) buttons.getLayoutParams();
-        lp.addRule(RelativeLayout.ALIGN_TOP, R.id.leftBlock);
-        lp.bottomMargin = 0;
-        buttons.setLayoutParams(lp);
-        buttons.setGravity(Gravity.CENTER_VERTICAL);
-    }
-
-    /** With the date below, keep the icons beside the clock rather than beside the last date line. */
-    private void alignDateBelowIconsWithClock() {
-        View clock = findViewById(R.id.clock);
-        View clockRow = (View) clock.getParent();
-        LinearLayout buttons = findViewById(R.id.topButtons);
-        RelativeLayout.LayoutParams lp = (RelativeLayout.LayoutParams) buttons.getLayoutParams();
-        lp.addRule(RelativeLayout.ALIGN_TOP, R.id.leftBlock);
-        lp.removeRule(RelativeLayout.ALIGN_BOTTOM);
-        lp.topMargin = 0;
-        lp.bottomMargin = 0;
-        buttons.setLayoutParams(lp);
-        // Either side can be laid out first; update after both without requesting another layout mid-pass.
-        Runnable align = () -> buttons.setTranslationY(clockRow.getTop() + clock.getTop()
-                + (clock.getHeight() - buttons.getHeight()) / 2f);
-        clockRow.addOnLayoutChangeListener((v, l, t, r, b, ol, ot, or, ob) -> align.run());
-        buttons.addOnLayoutChangeListener((v, l, t, r, b, ol, ot, or, ob) -> align.run());
     }
 
     /** The first top-bar button after Inputs that is shown, in bar order (top_bar_apps, the network pill, ...); Settings is always there. */
@@ -3271,70 +2834,6 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
     // ---- top bar ---------------------------------------------------------------------------------
 
     /** Some TVs (Coocaa OS) set the network time without ACTION_TIME_CHANGED, so keep checking until it is valid. */
-    private final Runnable clockCheck = this::updateClockVisibility;
-
-    private void updateClockVisibility() {
-        boolean valid = System.currentTimeMillis() >= TIME_VALID_AFTER_MS;
-        clockBlock.setVisibility(valid ? View.VISIBLE : View.INVISIBLE);
-        handler.removeCallbacks(clockCheck);
-        if (valid) {
-            updateGreeting();
-        } else {
-            handler.postDelayed(clockCheck, 1_000L);
-        }
-    }
-
-    private void updateGreeting() {
-        int hour = Calendar.getInstance().get(Calendar.HOUR_OF_DAY);
-        int res;
-        // Locale-specific day parts (app language on Android 13+).
-        // Indonesian: Pagi 00-10, Siang 10-15, Sore 15-18, Malam 18-24.
-        // Spain (es-ES) and Catalan: "Buenas tardes" into the evening; "Buenas noches" from 21.
-        // Latin American Spanish (es-MX, es-AR, …) keeps the default hours: evening strings are also
-        // «Buenas noches», and there «Buenas noches» from ~17 matches local use better than Spain's 21.
-        Locale locale = getResources().getConfiguration().getLocales().get(0);
-        String lang = locale.getLanguage();
-        String country = locale.getCountry();
-        if ("in".equals(lang) || "id".equals(lang)) {
-            if (hour < 10) res = R.string.good_morning;
-            else if (hour < 15) res = R.string.good_afternoon;
-            else if (hour < 18) res = R.string.good_evening;
-            else res = R.string.good_night;
-        } else if (("es".equals(lang) && "ES".equals(country)) || "ca".equals(lang)) {
-            if (hour < 6) res = R.string.good_night;
-            else if (hour < 12) res = R.string.good_morning;
-            else if (hour < 21) res = R.string.good_afternoon;
-            else res = R.string.good_night;
-        } else if ("da".equals(lang)) {
-            // Danish day parts: "God morgen" until 11, then "God formiddag" to noon.
-            if (hour < 5) res = R.string.good_night;
-            else if (hour < 11) res = R.string.good_morning;
-            else if (hour < 12) res = R.string.good_forenoon;
-            else if (hour < 18) res = R.string.good_afternoon;
-            else if (hour < 22) res = R.string.good_evening;
-            else res = R.string.good_night;
-        } else {
-            if (hour < 5) res = R.string.good_night;
-            else if (hour < 12) res = R.string.good_morning;
-            else if (hour < 17) res = R.string.good_afternoon;
-            else if (hour < 22) res = R.string.good_evening;
-            else res = R.string.good_night;
-        }
-        String festiveGreeting = festive ? festival.greetingText(getResources()) : "";
-        if (!festiveGreeting.isEmpty()) {
-            greeting.setText(festiveGreeting);
-            greeting.setTextColor(liftTowardsWhite(festival.accentColor(), 0.25f));
-        } else {
-            String weatherText = weatherGreeting(res, lang);
-            if (weatherText != null) greeting.setText(weatherText);
-            else greeting.setText(greetingName.isEmpty() ? getString(res)
-                    : getString(R.string.greeting_with_name, getString(res), greetingName));
-            greeting.setTextColor(greetingColor);
-        }
-        if (shamsi) shamsiDate.setText(Shamsi.today(getResources()));
-        if (lunar) lunarDate.setText(Lunar.today(getResources(), lunarOffset));
-    }
-
     // ---- race-weekend panel (a theme's race_calendar) -----------------------------------------------
 
     private static final int RACE_RED = 0xFFFF3B2F;
@@ -3691,14 +3190,6 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
             return;
         }
         shower.play(60, 2200, () -> root.removeView(shower));
-    }
-
-    private static int liftTowardsWhite(int argb, float amount) {
-        int r = (argb >> 16) & 0xFF, g = (argb >> 8) & 0xFF, b = argb & 0xFF;
-        r += (int) ((255 - r) * amount);
-        g += (int) ((255 - g) * amount);
-        b += (int) ((255 - b) * amount);
-        return 0xFF000000 | (r << 16) | (g << 8) | b;
     }
 
     /**
