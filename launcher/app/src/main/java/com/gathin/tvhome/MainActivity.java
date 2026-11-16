@@ -305,6 +305,8 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
     };
     /** continue_spotlight's carousel above the dock (full or quiet line); null while it is off. */
     private Spotlight spotlight;
+    /** home_style theatre: what to watch as the whole of Home, with the dock's apps in its arc; null otherwise. */
+    private TheatreHome theatre;
     private static final long HEARTS_GAP_MS = 10 * 60_000L;
     /** boot_to_live_tv: open the Live TV app on the first Home of each boot. */
     private boolean bootToLiveTv;
@@ -702,7 +704,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
         grid.setAdapter(adapter);
         // A layout without the spotlight's views (the Hebrew layout-iw copy) leaves the feature off instead of crashing.
         spotlightEnabled = cfg.continueSpotlight && !cinematic && cfg.dockRow && !cfg.singleRow
-                && Spotlight.available(this, quiet);
+                && !cfg.theatreHome && Spotlight.available(this, quiet);
         // picks_package: suggestions take turns with Continue watching in the spotlight.
         android.net.Uri picksProvider = Picks.uri(this, cfg.picksPackage);
         if (spotlightEnabled) {
@@ -711,6 +713,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
         }
         // The same add-on fetches Continue watching's https posters (Hotstar's), which the launcher cannot.
         WatchNext.webPosters = picksProvider == null ? null : picksProvider.getAuthority();
+        if (cfg.theatreHome) theatre = openTheatre(picksProvider);
         if (weatherUri != null && cfg.dockRow) {
             // The weather's rain, snow, fog and rays stop at the dock, which moves with the grid's padding and scroll.
             grid.addOnLayoutChangeListener((v, l, t, r, b, ol, ot, or, ob) -> placeWeatherEdge());
@@ -1120,6 +1123,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
         super.onResume();
         resumed = true;
         if (spotlight != null) spotlight.onResume();
+        if (theatre != null) theatre.onResume();
         if (weatherUri != null) {
             if (!weatherObserving) {
                 try {
@@ -1131,7 +1135,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
             }
             handler.removeCallbacks(weatherTick);
             weatherTick.run();   // read now, then every 15 minutes while Home is in front
-            weatherLayer.start();
+            if (theatre == null) weatherLayer.start();   // the theatre covers the layer: it shows the reading as text
         }
         // A festival that started or ended while Home was in the background: rebuild with or without it.
         if (festive != festival.active(LocalDate.now())) {
@@ -1292,6 +1296,58 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
         };
     }
 
+    // ---- theatre (home_style theatre, see TheatreHome) ----------------------------------------------
+
+    /**
+     * Puts the theatre over Home's own content. The grid keeps loading the apps, which the theatre's arc draws, but
+     * shows nothing and takes no focus, and Continue watching goes to the theatre instead of a row of tiles. The
+     * header's block only turns clear: the top bar is laid out against it.
+     */
+    private TheatreHome openTheatre(android.net.Uri picksProvider) {
+        java.util.Set<String> watch = watchNextPackages;
+        watchNextPackages = java.util.Collections.emptySet();
+        grid.setVisibility(View.GONE);
+        header.block().setAlpha(0f);
+        // Under the block that holds the top bar, so its buttons stay on top and in reach.
+        View content = (View) findViewById(R.id.topButtons).getParent().getParent();
+        return new TheatreHome(this, root, root.indexOfChild(content), handler, watch, picksProvider,
+                animations && !reducedMotion, new TheatreHome.Host() {
+            @Override public boolean isResumed() {
+                return resumed;
+            }
+
+            @Override public int readerSession() {
+                return readerSession;
+            }
+
+            @Override public int appCount() {
+                int docked = adapter.dockFilled();
+                return docked > 0 ? Math.min(docked, adapter.appCount()) : adapter.appCount();
+            }
+
+            @Override public String appLabel(int index) {
+                return adapter.labelAt(index);
+            }
+
+            @Override public Drawable appArt(int index) {
+                return adapter.artworkAt(index);
+            }
+
+            @Override public int appColor(int index) {
+                return adapter.ambientColorAt(index);
+            }
+
+            @Override public void openApp(int index) {
+                adapter.open(index);
+            }
+
+            @Override public boolean focusTopBar() {
+                View first = btnInputs.getVisibility() == View.VISIBLE ? btnInputs : firstTopButton();
+                return first.getVisibility() == View.VISIBLE && first.requestFocus();
+            }
+        });
+    }
+
     // ---- weather (weather_package) ----------------------------------------------------------------
 
     /** Reads the weather app's current reading off the main thread (it is IPC), then applies it on the main thread. */
@@ -1324,6 +1380,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
         weatherLayer.setWeather(plain ? null : weatherNow.kind, !plain && weatherNow.day);
         wallpaperPlayer.setWeather(plain ? null : weatherNow.kind);
         header.setWeather(weatherNow);
+        if (theatre != null) theatre.setWeather(weatherNow);
     }
 
     /** The weather effects end at the top of the dock's glass band (DockDecoration draws it above the tiles). */
@@ -1452,6 +1509,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
         cards = moduleCards ? CardFeature.run(() -> Cards.discover(this, hiddenApps,
                 () -> Cards.load(Cards.storeFile(this)), leanback), none) : none;
         adapter.reload(cards.isEmpty() ? none : CardFeature.run(() -> Cards.shown(cards), none), leanback);
+        if (theatre != null) theatre.onAppsChanged();
         lastFocusedKey = returnKey;
         lastFocused = returnSlot;
         packageSequence = currentPackageSequence(packageSequence);
@@ -1496,6 +1554,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
         readerSession++;   // results of reads still running are dropped
         handler.removeCallbacks(weatherTick);
         if (spotlight != null) spotlight.onPause();
+        if (theatre != null) theatre.onPause();
         if (weatherLayer != null) weatherLayer.stop();
         if (weatherObserving) {
             getContentResolver().unregisterContentObserver(weatherObserver);
@@ -1588,6 +1647,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
         readerSession++;
         weatherLoader.shutdownNow();
         if (spotlight != null) spotlight.onDestroy();
+        if (theatre != null) theatre.onDestroy();
         handler.removeCallbacks(weatherTick);
         if (gameDay != null) gameDay.shutdown();
         unregisterReceiver(packageReceiver);
@@ -2818,6 +2878,10 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
     private void focusTile(int position) {
         libraryFocusPending = false;
         cancelPendingFocusScroll();
+        if (theatre != null) {
+            theatre.focus();   // the tiles are not on screen: focus that would go to one goes to the theatre
+            return;
+        }
         if (adapter.appCount() == 0) {
             if (adapter.isLibraryAt(0)) focusLibrary();
             else firstTopButton().requestFocus();

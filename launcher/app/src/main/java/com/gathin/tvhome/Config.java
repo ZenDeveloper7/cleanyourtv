@@ -279,8 +279,13 @@ final class Config {
      * and single_row, which have their own layouts.
      */
     final boolean quietHome;
+    /**
+     * home_style theatre: Home is what to watch (see TheatreHome), a screen in front of a wall of posters, with the
+     * apps in an arc that Down brings up. It replaces the grid, the header and the spotlight.
+     */
+    final boolean theatreHome;
 
-    static final String HOME_QUIET = "quiet", HOME_CLASSIC = "classic";
+    static final String HOME_QUIET = "quiet", HOME_CLASSIC = "classic", HOME_THEATRE = "theatre";
     static final String GLOW_RADIAL = "radial", GLOW_HORIZON = "horizon";
     static final String GLASS_DEFAULT = "glass", GLASS_RIM = "rim", GLASS_HALO = "halo";
     /** Show each rotating wallpaper's name from wallpapers/captions.txt (config.xml / theme wallpaper_captions). */
@@ -327,6 +332,7 @@ final class Config {
                    String picksPackage, String homeStyle) {
         // First: the quiet look sets the dock and the top bar its own way, over the keys below.
         this.quietHome = quietHome(homeStyle, dockRow, singleRow, cinematicHome);
+        this.theatreHome = theatreHome(homeStyle);
         this.handleViewInputs = handleViewInputs;
         this.tileMenu = tileMenu;
         this.inputKeycodes = inputKeycodes;
@@ -373,15 +379,15 @@ final class Config {
         this.reorderButton = reorderButton;
         this.showNetworkPill = showNetworkPill;
         this.showInputsPill = showInputsPill;
-        this.iconOnlyButtons = iconOnlyButtons || quietHome;
-        this.iconOnlyInputs = iconOnlyInputs || quietHome;
+        this.iconOnlyButtons = iconOnlyButtons || quietHome || theatreHome;   // theatre: the top bar is icons too
+        this.iconOnlyInputs = iconOnlyInputs || quietHome || theatreHome;
         this.iconOnlyVpn = iconOnlyVpn;
         this.backOpensClock = backOpensClock;
         this.glowSnap = glowSnap;
         this.settingsKeyClearTask = settingsKeyClearTask;
         this.libraryButton = libraryButton;
         this.showLibraryPill = showLibraryPill;
-        this.wifiLabelWidth = quietHome ? 0 : wifiLabelWidth;   // quiet: the Wi-Fi pill is an icon too
+        this.wifiLabelWidth = quietHome || theatreHome ? 0 : wifiLabelWidth;   // quiet: the Wi-Fi pill is an icon too
         this.alwaysShowNames = alwaysShowNames;
         this.wallpaperTrueColor = wallpaperTrueColor;
         this.focusOvershoot = focusOvershoot;
@@ -455,10 +461,18 @@ final class Config {
         this.glassStyle = glassStyle(glassStyle);
     }
 
-    /** home_style quiet (anything but classic), where the layout allows it: a dock row, not cinematic, not single_row. */
+    /**
+     * home_style quiet (anything but classic or theatre), where the layout allows it: a dock row, not cinematic,
+     * not single_row.
+     */
     static boolean quietHome(String homeStyle, boolean dockRow, boolean singleRow, boolean cinematicHome) {
         boolean quiet = homeStyle == null || !HOME_CLASSIC.equalsIgnoreCase(homeStyle.trim());
-        return quiet && dockRow && !singleRow && !cinematicHome;
+        return quiet && !theatreHome(homeStyle) && dockRow && !singleRow && !cinematicHome;
+    }
+
+    /** home_style theatre. */
+    static boolean theatreHome(String homeStyle) {
+        return homeStyle != null && HOME_THEATRE.equalsIgnoreCase(homeStyle.trim());
     }
 
     /** A known glow_style, or radial (the default) for anything else. */

@@ -748,6 +748,11 @@ public class AppAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder> {
         return DockSlots.focusable(position, docked, emptySlots);
     }
 
+    /** Opens the app at this position as OK on its tile does (for a Home that draws the apps itself). */
+    void open(int position) {
+        if (position >= 0 && position < items.size()) launch(items.get(position));
+    }
+
     String labelAt(int position) {
         return position >= 0 && position < items.size() ? items.get(position).label : "";
     }

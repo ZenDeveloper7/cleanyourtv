@@ -307,7 +307,7 @@ final class Spotlight {
                     row.key() + "/" + Math.round(row.progress() * 50) + "/" + (rowArt != null),
                     appName.isEmpty() ? activity.getString(R.string.spotlight_up_next)
                             : activity.getString(R.string.spotlight_kicker, appName),
-                    row.title, row.episode, left(row), activity.getString(R.string.spotlight_resume),
+                    row.title, row.episode, left(activity, row), activity.getString(R.string.spotlight_resume),
                     row.progress(), intent, rowArt, false);
             showSlides();
         });
@@ -474,12 +474,12 @@ final class Spotlight {
     }
 
     /** "42 min left", "1 h 12 min left", or "Up next" for a next-episode row; "" when the length is unknown. */
-    private String left(WatchNext.Row row) {
-        if (row.type == WatchNext.TYPE_NEXT) return activity.getString(R.string.spotlight_up_next);
+    static String left(Context ctx, WatchNext.Row row) {
+        if (row.type == WatchNext.TYPE_NEXT) return ctx.getString(R.string.spotlight_up_next);
         if (row.duration > 0 && row.position > 0) {
             long min = Math.max(1, (row.duration - row.position + 59_999) / 60_000);
-            return min >= 60 ? activity.getString(R.string.spotlight_left_hours, (int) (min / 60), (int) (min % 60))
-                    : activity.getString(R.string.spotlight_left_min, (int) min);
+            return min >= 60 ? ctx.getString(R.string.spotlight_left_hours, (int) (min / 60), (int) (min % 60))
+                    : ctx.getString(R.string.spotlight_left_min, (int) min);
         }
         return "";
     }
